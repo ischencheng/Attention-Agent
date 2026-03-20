@@ -1,0 +1,7 @@
+confluent-kafka
+requests
+prometheus-client
+opentelemetry-api
+opentelemetry-sdk
+opentelemetry-exporter-otlp-proto-http
+opentelemetry-instrumentation-requests

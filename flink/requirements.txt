@@ -1,0 +1,5 @@
+apache-flink==1.19.1
+confluent-kafka
+opentelemetry-api
+opentelemetry-sdk
+opentelemetry-exporter-otlp-proto-http

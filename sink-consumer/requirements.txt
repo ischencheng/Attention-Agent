@@ -1,0 +1,6 @@
+confluent-kafka
+psycopg2-binary
+prometheus-client
+opentelemetry-api
+opentelemetry-sdk
+opentelemetry-exporter-otlp-proto-http

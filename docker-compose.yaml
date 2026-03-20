@@ -1,0 +1,506 @@
+services:
+  kafka1:
+    image: apache/kafka:latest
+    container_name: kafka1
+    hostname: kafka1
+    networks: [backend]
+    ports:
+      - "9092:9092"   # host -> kafka1 external listener
+      - "29092:29092"   
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: "broker,controller"
+
+      # Listener names -> protocol
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT"
+
+      # Bind listeners inside container
+      # - PLAINTEXT: for inter-broker + other containers on docker network
+      # - PLAINTEXT_HOST: for host machine access
+      # - CONTROLLER: for KRaft quorum
+      KAFKA_LISTENERS: "PLAINTEXT://kafka1:19092,CONTROLLER://kafka1:9093,PLAINTEXT_HOST://0.0.0.0:9092"
+
+      # What Kafka tells clients to use
+      # - docker network clients use kafka1:19092
+      # - host clients use localhost:9092
+      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://kafka1:19092,PLAINTEXT_HOST://localhost:9092"
+
+      KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+      KAFKA_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
+
+      # KRaft quorum voters (all controllers)
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka1:9093,2@kafka2:9093,3@kafka3:9093"
+
+      # Data
+      KAFKA_LOG_DIRS: "/var/lib/kafka/data"
+
+      # Replication defaults (3-node HA)
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+      KAFKA_MIN_INSYNC_REPLICAS: 2
+      KAFKA_LOG_RETENTION_MS: 600000
+      KAFKA_LOG_RETENTION_CHECK_INTERVAL_MS: 60000
+
+      # KRaft cluster id (must be same on all nodes)
+      CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qk"
+
+    volumes:
+      - ./kafka1/data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  kafka2:
+    image: apache/kafka:latest
+    container_name: kafka2
+    hostname: kafka2
+    networks: [backend]
+    ports:
+      - "9093:9092"   # host -> kafka2 external listener
+      - "29093:29093"   
+    environment:
+      KAFKA_NODE_ID: 2
+      KAFKA_PROCESS_ROLES: "broker,controller"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT"
+      KAFKA_LISTENERS: "PLAINTEXT://kafka2:19092,CONTROLLER://kafka2:9093,PLAINTEXT_HOST://0.0.0.0:9092"
+      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://kafka2:19092,PLAINTEXT_HOST://localhost:9093"
+      KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+      KAFKA_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka1:9093,2@kafka2:9093,3@kafka3:9093"
+      KAFKA_LOG_DIRS: "/var/lib/kafka/data"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+      KAFKA_MIN_INSYNC_REPLICAS: 2
+      KAFKA_LOG_RETENTION_MS: 600000
+      KAFKA_LOG_RETENTION_CHECK_INTERVAL_MS: 60000
+      CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qk"
+    volumes:
+      - ./kafka2/data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  kafka3:
+    image: apache/kafka:latest
+    container_name: kafka3
+    hostname: kafka3
+    networks: [backend]
+    ports:
+      - "9094:9092"   # host -> kafka3 external listener
+      - "29094:29094"   
+    environment:
+      KAFKA_NODE_ID: 3
+      KAFKA_PROCESS_ROLES: "broker,controller"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT"
+      KAFKA_LISTENERS: "PLAINTEXT://kafka3:19092,CONTROLLER://kafka3:9093,PLAINTEXT_HOST://0.0.0.0:9092"
+      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://kafka3:19092,PLAINTEXT_HOST://localhost:9094"
+      KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+      KAFKA_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka1:9093,2@kafka2:9093,3@kafka3:9093"
+      KAFKA_LOG_DIRS: "/var/lib/kafka/data"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+      KAFKA_MIN_INSYNC_REPLICAS: 2
+      KAFKA_LOG_RETENTION_MS: 600000
+      KAFKA_LOG_RETENTION_CHECK_INTERVAL_MS: 60000
+      CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qk"
+    volumes:
+      - ./kafka3/data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka-cluster-ui
+    networks: [backend]
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: "local"
+      # use INTERNAL listener ports on docker network
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: "kafka1:19092,kafka2:19092,kafka3:19092"
+    depends_on:
+      kafka1:
+        condition: service_healthy
+      kafka2:
+        condition: service_healthy
+      kafka3:
+        condition: service_healthy
+
+  kafka-exporter:
+    image: danielqsj/kafka-exporter:v1.9.0
+    container_name: kafka-exporter
+    networks: [backend]
+    ports:
+      - "9308:9308"
+    command:
+      - "--kafka.server=kafka1:19092"
+      - "--kafka.server=kafka2:19092"
+      - "--kafka.server=kafka3:19092"
+    restart: unless-stopped
+    depends_on:
+      kafka1:
+        condition: service_healthy
+      kafka2:
+        condition: service_healthy
+      kafka3:
+        condition: service_healthy
+
+  bluesky-ingestor:
+    build:
+      context: ./bluesky-demo
+      dockerfile: Dockerfile
+    container_name: bluesky-ingestor
+    networks: [backend]
+    environment:
+      PYTHONUNBUFFERED: "1"
+      OTEL_SERVICE_NAME: bluesky-ingestor
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+    command:
+      - "python"
+      - "bluesky_ingestor.py"
+      - "--bootstrap"
+      - "kafka1:19092,kafka2:19092,kafka3:19092"
+      - "--topic"
+      - "bluesky_raw"
+      - "--dlq-topic"
+      - "bluesky_raw_dlq"
+      - "--jetstream-url"
+      - "wss://jetstream2.us-east.bsky.network/subscribe"
+      - "--metrics-port"
+      - "8020"
+      - "--max-produce-retries"
+      - "5"
+      - "--produce-retry-backoff-seconds"
+      - "0.5"
+    ports:
+      - "8020:8020"
+    restart: unless-stopped
+    depends_on:
+      kafka1:
+        condition: service_healthy
+      kafka2:
+        condition: service_healthy
+      kafka3:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+
+  flink-jobmanager:
+    build:
+      context: ./flink
+      dockerfile: Dockerfile
+    container_name: flink-jobmanager
+    hostname: flink-jobmanager
+    command: jobmanager
+    networks: [backend]
+    ports:
+      - "8081:8081"
+      - "9249:9249"
+    environment:
+      JOB_MANAGER_RPC_ADDRESS: flink-jobmanager
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: flink-jobmanager
+        metrics.reporter.prom.factory.class: org.apache.flink.metrics.prometheus.PrometheusReporterFactory
+        metrics.reporter.prom.port: 9249
+    restart: unless-stopped
+    depends_on:
+      kafka1:
+        condition: service_healthy
+      kafka2:
+        condition: service_healthy
+      kafka3:
+        condition: service_healthy
+
+  flink-taskmanager:
+    build:
+      context: ./flink
+      dockerfile: Dockerfile
+    container_name: flink-taskmanager
+    hostname: flink-taskmanager
+    command: taskmanager
+    networks: [backend]
+    ports:
+      - "9250:9250"
+    environment:
+      JOB_MANAGER_RPC_ADDRESS: flink-jobmanager
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: flink-jobmanager
+        metrics.reporter.prom.factory.class: org.apache.flink.metrics.prometheus.PrometheusReporterFactory
+        metrics.reporter.prom.port: 9250
+    restart: unless-stopped
+    depends_on:
+      - flink-jobmanager
+
+  flink-job:
+    build:
+      context: ./flink
+      dockerfile: Dockerfile
+    container_name: flink-job
+    hostname: flink-job
+    networks: [backend]
+    environment:
+      OTEL_SERVICE_NAME: flink-job
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+    command:
+      - "/bin/sh"
+      - "-c"
+      - "until curl -fsS http://flink-jobmanager:8081/overview > /dev/null; do sleep 2; done; flink run -m flink-jobmanager:8081 -d -py /opt/flink/usrlib/bluesky_flink_job.py --bootstrap kafka1:19092,kafka2:19092,kafka3:19092 --raw-topic bluesky_raw --enriched-topic bluesky_enriched --candidate-topic strategy_signal_candidate --startup-mode earliest --checkpoint-interval-ms 10000 --parallelism 1"
+    restart: on-failure
+    depends_on:
+      - flink-jobmanager
+      - flink-taskmanager
+      - otel-collector
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: postgres
+    hostname: postgres
+    networks: [backend]
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: bluesky
+      POSTGRES_USER: bluesky
+      POSTGRES_PASSWORD: bluesky
+    volumes:
+      - ./postgres/data:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bluesky -d bluesky"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+
+  postgres-exporter:
+    image: quay.io/prometheuscommunity/postgres-exporter:v0.16.0
+    container_name: postgres-exporter
+    hostname: postgres-exporter
+    networks: [backend]
+    environment:
+      DATA_SOURCE_NAME: "postgresql://bluesky:bluesky@postgres:5432/bluesky?sslmode=disable"
+    ports:
+      - "9187:9187"
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  sink-consumer:
+    build:
+      context: ./sink-consumer
+      dockerfile: Dockerfile
+    container_name: sink-consumer
+    hostname: sink-consumer
+    networks: [backend]
+    environment:
+      PYTHONUNBUFFERED: "1"
+      OTEL_SERVICE_NAME: sink-consumer
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+    command:
+      - "python"
+      - "kafka_to_postgres_sink.py"
+      - "--bootstrap"
+      - "kafka1:19092,kafka2:19092,kafka3:19092"
+      - "--topics"
+      - "bluesky_raw,bluesky_enriched,strategy_signal_candidate,strategy_signal_final"
+      - "--group-id"
+      - "sink-postgres-v1"
+      - "--db-host"
+      - "postgres"
+      - "--db-port"
+      - "5432"
+      - "--db-name"
+      - "bluesky"
+      - "--db-user"
+      - "bluesky"
+      - "--db-password"
+      - "bluesky"
+      - "--metrics-port"
+      - "8040"
+    ports:
+      - "8040:8040"
+    restart: unless-stopped
+    depends_on:
+      kafka1:
+        condition: service_healthy
+      kafka2:
+        condition: service_healthy
+      kafka3:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+
+  llm-worker:
+    build:
+      context: ./llm-worker
+      dockerfile: Dockerfile
+    container_name: llm-worker
+    hostname: llm-worker
+    networks: [backend]
+    environment:
+      PYTHONUNBUFFERED: "1"
+      GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
+      OTEL_SERVICE_NAME: llm-worker
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+    command:
+      - "python"
+      - "llm_worker.py"
+      - "--bootstrap"
+      - "kafka1:19092,kafka2:19092,kafka3:19092"
+      - "--input-topic"
+      - "strategy_signal_candidate"
+      - "--output-topic"
+      - "strategy_signal_final"
+      - "--group-id"
+      - "llm-worker-v1"
+      - "--metrics-port"
+      - "8030"
+      - "--llm-provider"
+      - "gemini"
+      - "--llm-model"
+      - "gemini-2.5-flash-lite"
+      - "--batch-size"
+      - "200"
+      - "--batch-max-wait-seconds"
+      - "600"
+    ports:
+      - "8030:8030"
+    restart: unless-stopped
+    depends_on:
+      kafka1:
+        condition: service_healthy
+      kafka2:
+        condition: service_healthy
+      kafka3:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+
+  backend-fastapi:
+    build:
+      context: ./backend-fastapi
+      dockerfile: Dockerfile
+    container_name: backend-fastapi
+    hostname: backend-fastapi
+    networks: [backend]
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: bluesky
+      DB_USER: bluesky
+      DB_PASSWORD: bluesky
+      CORS_ORIGINS: "*"
+      WS_POLL_INTERVAL_SECONDS: "1.0"
+      LOG_LEVEL: INFO
+      OTEL_SERVICE_NAME: backend-fastapi
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      sink-consumer:
+        condition: service_started
+      otel-collector:
+        condition: service_started
+
+  jaeger:
+    image: jaegertracing/jaeger:2.5.0
+    container_name: jaeger
+    hostname: jaeger
+    networks: [backend]
+    ports:
+      - "16686:16686"
+      - "4317:4317"
+    restart: unless-stopped
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.116.1
+    container_name: otel-collector
+    hostname: otel-collector
+    networks: [backend]
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    volumes:
+      - ./observability/otel-collector-config.yaml:/etc/otelcol-contrib/config.yaml:ro
+    ports:
+      - "4318:4318"
+    depends_on:
+      - jaeger
+    restart: unless-stopped
+
+  frontend-react:
+    build:
+      context: ./frontend-react
+      dockerfile: Dockerfile
+    container_name: frontend-react
+    hostname: frontend-react
+    networks: [backend]
+    environment:
+      VITE_API_BASE_URL: ""
+      VITE_WS_URL: ""
+      VITE_PROXY_TARGET: http://backend-fastapi:8000
+    ports:
+      - "5173:5173"
+    restart: unless-stopped
+    depends_on:
+      - backend-fastapi
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    networks: [backend]
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./observability/prometheus-rules.pipeline.yml:/etc/prometheus/rules/pipeline.yml:ro
+    depends_on:
+      - kafka-exporter
+      - bluesky-ingestor
+      - llm-worker
+      - backend-fastapi
+      - sink-consumer
+      - postgres-exporter
+      - otel-collector
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    networks: [backend]
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+      - jaeger
+
+networks:
+  backend: {}

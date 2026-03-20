@@ -1,0 +1,16 @@
+.git
+.gitignore
+.venv
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+
+# Local Kafka persistent data can be huge; never send as build context.
+kafka1/data/
+kafka2/data/
+kafka3/data/
+
+# Observability runtime data (if any)
+observability/**/data/

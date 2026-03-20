@@ -1,0 +1,17 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+
+# Local runtime logs and snapshots
+*.log
+logs_snapshot_*.log
+postgres/data/
+kafka1/data/
+kafka2/data/
+kafka3/data/
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/

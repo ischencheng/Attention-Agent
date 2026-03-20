@@ -1,0 +1,257 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
+      "id": 1,
+      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "center", "textMode": "value", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "targets": [{ "expr": "pipeline_e2e_latency_seconds:p95", "refId": "A" }],
+      "title": "E2E Latency P95",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "percentunit" }, "overrides": [] },
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 },
+      "id": 2,
+      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "center", "textMode": "value", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "targets": [{ "expr": "pipeline_e2e_success_ratio:5m", "refId": "A" }],
+      "title": "E2E Success Ratio",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "percentunit" }, "overrides": [] },
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 0 },
+      "id": 3,
+      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "center", "textMode": "value", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "targets": [{ "expr": "pipeline_e2e_error_ratio:5m", "refId": "A" }],
+      "title": "LLM Error Ratio",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "percentunit" }, "overrides": [] },
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 0 },
+      "id": 4,
+      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "center", "textMode": "value", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "targets": [{ "expr": "pipeline_trace_completeness_ratio:5m", "refId": "A" }],
+      "title": "Trace Completeness",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 0 },
+      "id": 5,
+      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "center", "textMode": "value", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "targets": [{ "expr": "pipeline_freshness_seconds", "refId": "A" }],
+      "title": "Pipeline Freshness",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "currencyUSD" }, "overrides": [] },
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 0 },
+      "id": 6,
+      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "center", "textMode": "value", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "targets": [{ "expr": "rate(llm_cost_usd_total[5m]) * 60", "refId": "A" }],
+      "title": "LLM Cost / Min",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "id": 7,
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "single", "sort": "none" } },
+      "targets": [
+        { "expr": "rate(bluesky_ingestor_raw_publish_success_total[5m])", "legendFormat": "ingestor_raw_success", "refId": "A" },
+        { "expr": "rate(signals_candidate_total[5m])", "legendFormat": "candidate_in", "refId": "B" },
+        { "expr": "rate(signals_final_total[5m])", "legendFormat": "final_out", "refId": "C" },
+        { "expr": "rate(signals_drop_total[5m])", "legendFormat": "dropped", "refId": "D" }
+      ],
+      "title": "Pipeline Signal Flow",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "id": 8,
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "single", "sort": "none" } },
+      "targets": [
+        { "expr": "histogram_quantile(0.5, sum(rate(signal_end_to_end_latency_seconds_bucket[5m])) by (le))", "legendFormat": "E2E P50", "refId": "A" },
+        { "expr": "histogram_quantile(0.95, sum(rate(signal_end_to_end_latency_seconds_bucket[5m])) by (le))", "legendFormat": "E2E P95", "refId": "B" },
+        { "expr": "histogram_quantile(0.95, sum(rate(llm_latency_seconds_bucket[5m])) by (le))", "legendFormat": "LLM P95", "refId": "C" }
+      ],
+      "title": "Latency Trends",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 12 },
+      "id": 9,
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "single", "sort": "none" } },
+      "targets": [
+        { "expr": "sum by (consumergroup, topic) (kafka_consumergroup_lag{topic=~\"strategy_signal_candidate|strategy_signal_final\"})", "legendFormat": "{{consumergroup}}/{{topic}}", "refId": "A" }
+      ],
+      "title": "Kafka Lag (Candidate/Final)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 12 },
+      "id": 10,
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "single", "sort": "none" } },
+      "targets": [
+        { "expr": "sum by (topic, status) (rate(sink_consumer_db_writes_total[5m]))", "legendFormat": "{{topic}} {{status}}", "refId": "A" },
+        { "expr": "sum by (status) (rate(sink_consumer_commit_total[5m]))", "legendFormat": "commit {{status}}", "refId": "B" }
+      ],
+      "title": "Sink DB Writes and Commits",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 12 },
+      "id": 11,
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "single", "sort": "none" } },
+      "targets": [
+        { "expr": "histogram_quantile(0.95, sum(rate(sink_consumer_db_write_latency_seconds_bucket[5m])) by (le, topic))", "legendFormat": "{{topic}} p95", "refId": "A" }
+      ],
+      "title": "Sink DB Write Latency P95",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
+      "id": 12,
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "single", "sort": "none" } },
+      "targets": [
+        { "expr": "sum by (endpoint) (rate(fastapi_requests_total[5m]))", "legendFormat": "{{endpoint}}", "refId": "A" },
+        { "expr": "rate(ws_signals_pushed_total[5m])", "legendFormat": "ws_push", "refId": "B" }
+      ],
+      "title": "Backend API and WS Throughput",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
+      "id": 13,
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "single", "sort": "none" } },
+      "targets": [
+        { "expr": "histogram_quantile(0.95, sum(rate(fastapi_db_query_latency_seconds_bucket[5m])) by (le, query_name))", "legendFormat": "{{query_name}} p95", "refId": "A" }
+      ],
+      "title": "FastAPI DB Query Latency P95",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 28 },
+      "id": 14,
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "single", "sort": "none" } },
+      "targets": [
+        { "expr": "sum by (metric_name, status) (rate(frontend_web_vitals_total[5m]))", "legendFormat": "{{metric_name}} {{status}}", "refId": "A" }
+      ],
+      "title": "Frontend Vitals Report Rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 28 },
+      "id": 15,
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "single", "sort": "none" } },
+      "targets": [
+        { "expr": "sum by (metric_name, rating) (rate(frontend_web_vitals_value_count[5m]))", "legendFormat": "{{metric_name}} {{rating}}", "refId": "A" }
+      ],
+      "title": "Frontend Vitals Samples",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 28 },
+      "id": 16,
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "single", "sort": "none" } },
+      "targets": [
+        { "expr": "sum by (datname) (rate(pg_stat_database_xact_commit[5m]))", "legendFormat": "{{datname}} commit/s", "refId": "A" },
+        { "expr": "sum by (datname) (rate(pg_stat_database_xact_rollback[5m]))", "legendFormat": "{{datname}} rollback/s", "refId": "B" },
+        { "expr": "sum by (datname) (pg_stat_database_numbackends)", "legendFormat": "{{datname}} connections", "refId": "C" }
+      ],
+      "title": "PostgreSQL TPS and Connections",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "percentunit" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 36 },
+      "id": 17,
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "single", "sort": "none" } },
+      "targets": [
+        {
+          "expr": "sum by (datname) (rate(pg_stat_database_blks_hit[5m])) / clamp_min(sum by (datname) (rate(pg_stat_database_blks_hit[5m]) + rate(pg_stat_database_blks_read[5m])), 0.000001)",
+          "legendFormat": "{{datname}} cache_hit_ratio",
+          "refId": "A"
+        }
+      ],
+      "title": "PostgreSQL Cache Hit Ratio",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 36 },
+      "id": 18,
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "single", "sort": "none" } },
+      "targets": [
+        { "expr": "rate(bluesky_ingestor_events_received_total[5m])", "legendFormat": "events_received", "refId": "A" },
+        { "expr": "sum by (reason) (rate(bluesky_ingestor_events_filtered_total[5m]))", "legendFormat": "filtered {{reason}}", "refId": "B" },
+        { "expr": "rate(bluesky_ingestor_reconnect_total[5m])", "legendFormat": "reconnect/s", "refId": "C" }
+      ],
+      "title": "Ingestor Health",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 39,
+  "style": "dark",
+  "tags": ["pipeline", "trace", "metrics", "postgres", "frontend"],
+  "templating": { "list": [] },
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": {},
+  "timezone": "",
+  "title": "Pipeline Observability Complete",
+  "uid": "pipeline-observability-complete",
+  "version": 1,
+  "weekStart": ""
+}
