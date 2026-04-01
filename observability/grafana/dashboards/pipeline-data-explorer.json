@@ -45,7 +45,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT id, signal_type, author_did, uri, score, event_ts, created_at\nFROM strategy_signals\nWHERE signal_type = '${signal_type}'\nORDER BY id DESC\nLIMIT ${limit};",
+          "rawSql": "SELECT id, payload->>'cid' AS cid, payload->>'report' AS report, created_at\nFROM decision_packets\nORDER BY id DESC\nLIMIT ${limit};",
           "refId": "A",
           "sql": {
             "columns": [],
@@ -53,7 +53,7 @@
           }
         }
       ],
-      "title": "Latest Signals",
+      "title": "Latest Decision Packets",
       "type": "table"
     },
     {
@@ -80,7 +80,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT i.id, i.model_name, i.recommendation, i.confidence, i.created_at,\n       COALESCE(s.uri, '') AS source_uri\nFROM llm_insights i\nLEFT JOIN LATERAL (\n  SELECT payload->>'uri' AS uri\n) s ON true\nORDER BY i.id DESC\nLIMIT ${limit};",
+          "rawSql": "SELECT id, payload->>'cid' AS cid, payload->'mid_agent_relevant_cids' AS mid_agent_relevant_cids, created_at\nFROM annotations\nORDER BY id DESC\nLIMIT ${limit};",
           "refId": "A",
           "sql": {
             "columns": [],
@@ -88,7 +88,7 @@
           }
         }
       ],
-      "title": "Latest LLM Insights",
+      "title": "Latest Event Packets",
       "type": "table"
     },
     {
@@ -124,7 +124,7 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT date_trunc('minute', created_at) AS time,\n       signal_type AS metric,\n       COUNT(*)::double precision AS value\nFROM strategy_signals\nWHERE created_at >= NOW() - INTERVAL '2 hours'\nGROUP BY 1, 2\nORDER BY 1;",
+          "rawSql": "SELECT date_trunc('minute', created_at) AS time,\n       metric,\n       COUNT(*)::double precision AS value\nFROM (\n  SELECT created_at, 'attention_ticket'::text AS metric FROM attention_tickets\n  UNION ALL\n  SELECT created_at, 'annotation'::text AS metric FROM annotations\n  UNION ALL\n  SELECT created_at, 'decision_packet'::text AS metric FROM decision_packets\n) t\nWHERE created_at >= NOW() - INTERVAL '2 hours'\nGROUP BY 1, 2\nORDER BY 1;",
           "refId": "A",
           "sql": {
             "columns": [],
@@ -132,8 +132,113 @@
           }
         }
       ],
-      "title": "Signals Per Minute",
+      "title": "Packet Throughput Per Minute",
       "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "postgres",
+        "uid": "postgres"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 24,
+        "x": 0,
+        "y": 18
+      },
+      "id": 4,
+      "options": {
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT table_name, pg_size_pretty(pg_total_relation_size(quote_ident(table_schema)||'.'||quote_ident(table_name))) AS table_size\nFROM information_schema.tables\nWHERE table_schema = 'public'\n  AND table_name IN ('raw_messages','source_clean','embedding_requests','vector_embeddings','attention_tickets','annotations','decision_packets')\nORDER BY table_name;",
+          "refId": "A",
+          "sql": {
+            "columns": [],
+            "groupBy": []
+          }
+        }
+      ],
+      "title": "Lakehouse Tables and Size",
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "postgres",
+        "uid": "postgres"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 25
+      },
+      "id": 5,
+      "options": {
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT id, kafka_topic, payload->>'cid' AS cid, left(COALESCE(raw->'commit'->'record'->>'text', ''), 180) AS text_preview, created_at\nFROM source_clean\nORDER BY id DESC\nLIMIT ${limit};",
+          "refId": "A",
+          "sql": {
+            "columns": [],
+            "groupBy": []
+          }
+        }
+      ],
+      "title": "Latest Flink-Passed Raw Messages",
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "postgres",
+        "uid": "postgres"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 25
+      },
+      "id": 6,
+      "options": {
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT id, kafka_topic, payload->>'cid' AS cid, created_at\nFROM vector_embeddings\nORDER BY id DESC\nLIMIT ${limit};",
+          "refId": "A",
+          "sql": {
+            "columns": [],
+            "groupBy": []
+          }
+        }
+      ],
+      "title": "Latest Vector Embeddings",
+      "type": "table"
     }
   ],
   "refresh": "10s",
@@ -146,33 +251,6 @@
   ],
   "templating": {
     "list": [
-      {
-        "current": {
-          "selected": false,
-          "text": "final",
-          "value": "final"
-        },
-        "hide": 0,
-        "includeAll": false,
-        "label": "Signal Type",
-        "multi": false,
-        "name": "signal_type",
-        "options": [
-          {
-            "selected": false,
-            "text": "candidate",
-            "value": "candidate"
-          },
-          {
-            "selected": true,
-            "text": "final",
-            "value": "final"
-          }
-        ],
-        "query": "candidate,final",
-        "skipUrlSync": false,
-        "type": "custom"
-      },
       {
         "current": {
           "selected": false,
@@ -213,7 +291,7 @@
   },
   "timepicker": {},
   "timezone": "",
-  "title": "Pipeline Data Explorer (PostgreSQL)",
+  "title": "Lakehouse Data Explorer (PostgreSQL)",
   "uid": "pipeline-data-explorer",
   "version": 1,
   "weekStart": ""

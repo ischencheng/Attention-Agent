@@ -27,12 +27,40 @@ scrape_configs:
           env: local_lab
           component: bluesky_ingestor
 
-  - job_name: llm_worker
+  - job_name: fast_agent
     static_configs:
-      - targets: ["llm-worker:8030"]
+      - targets: ["fast-agent:8030"]
         labels:
           env: local_lab
-          component: llm_worker
+          component: fast_agent
+
+  - job_name: local_ml_filter
+    static_configs:
+      - targets: ["local-ml-filter:8031"]
+        labels:
+          env: local_lab
+          component: local_ml_filter
+
+  - job_name: mid_agent
+    static_configs:
+      - targets: ["mid-agent:8032"]
+        labels:
+          env: local_lab
+          component: mid_agent
+
+  - job_name: embed_worker
+    static_configs:
+      - targets: ["embed-worker:8034"]
+        labels:
+          env: local_lab
+          component: embed_worker
+
+  - job_name: strong_agent
+    static_configs:
+      - targets: ["strong-agent:8033"]
+        labels:
+          env: local_lab
+          component: strong_agent
 
   - job_name: sink_consumer
     static_configs:

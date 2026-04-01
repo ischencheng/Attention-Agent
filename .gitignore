@@ -15,3 +15,22 @@ kafka3/data/
 .DS_Store
 Thumbs.db
 .vscode/
+
+# Node
+node_modules/
+
+# Large files / personal data
+Takeout/
+takeout-*.zip
+manual-check-output/
+
+# IDE / AI tooling (session-specific)
+.pi/
+.npmrc
+.claude/settings.local.json
+
+# Build artifacts
+ts-agents/dist/
+ts-agents/node_modules/
+package-lock.json
+ts-agents/package-lock.json

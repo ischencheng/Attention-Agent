@@ -4,25 +4,17 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import os
 import signal
 import time
-from datetime import datetime, timezone
 from typing import Any
 
 import psycopg2
 from confluent_kafka import Consumer, KafkaError, KafkaException, Message
-from opentelemetry import propagate, trace
-from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-from opentelemetry.sdk.resources import Resource
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from prometheus_client import Counter, Gauge, Histogram, start_http_server
 from psycopg2.extras import Json
 
 
 LOGGER = logging.getLogger("kafka-postgres-sink")
-TRACER = trace.get_tracer("sink.consumer")
 
 MESSAGES_TOTAL = Counter(
     "sink_consumer_messages_total",
@@ -44,32 +36,7 @@ COMMIT_TOTAL = Counter(
     "Total Kafka offset commit attempts in sink consumer.",
     ("status",),
 )
-LAST_SUCCESSFUL_WRITE_UNIXTIME = Gauge(
-    "sink_consumer_last_successful_write_unixtime",
-    "Unix timestamp of the latest successful DB write.",
-)
-
-
-def init_tracing(service_name: str) -> None:
-    endpoint = os.getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT") or (
-        os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://otel-collector:4318").rstrip("/") + "/v1/traces"
-    )
-    provider = TracerProvider(resource=Resource.create({"service.name": service_name}))
-    provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint=endpoint)))
-    trace.set_tracer_provider(provider)
-    LOGGER.info("otel tracing enabled endpoint=%s service=%s", endpoint, service_name)
-
-
-def kafka_headers_to_carrier(headers: list[tuple[str, bytes | None]] | None) -> dict[str, str]:
-    carrier: dict[str, str] = {}
-    for key, value in headers or []:
-        if value is None:
-            continue
-        try:
-            carrier[key] = value.decode("utf-8")
-        except UnicodeDecodeError:
-            continue
-    return carrier
+LAST_SUCCESSFUL_WRITE_UNIXTIME = Gauge("sink_consumer_last_successful_write_unixtime", "Unix timestamp of the latest successful DB write.")
 
 
 def parse_args() -> argparse.Namespace:
@@ -81,7 +48,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--topics",
-        default="bluesky_raw,bluesky_enriched,strategy_signal_candidate",
+        default="source_raw,source_clean,vector_embedding,attention_ticket,annotations,decision_packet",
         help="Comma separated Kafka topics to consume.",
     )
     parser.add_argument(
@@ -124,25 +91,31 @@ def parse_topics(topics_csv: str) -> list[str]:
     return topics
 
 
-def epoch_ms_to_utc(value: Any) -> datetime | None:
-    if value is None:
-        return None
-    try:
-        numeric = int(value)
-    except (TypeError, ValueError):
-        return None
-    if numeric <= 0:
-        return None
-    return datetime.fromtimestamp(numeric / 1000.0, tz=timezone.utc)
+def extract_cid(msg: Message, payload: dict[str, Any]) -> str | None:
+    cid = payload.get("cid")
+    if isinstance(cid, str) and cid:
+        return cid
 
+    commit = payload.get("commit")
+    if isinstance(commit, dict):
+        commit_cid = commit.get("cid")
+        if isinstance(commit_cid, str) and commit_cid:
+            return commit_cid
 
-def decode_message_key(msg: Message) -> str | None:
+    raw = payload.get("raw")
+    if isinstance(raw, dict):
+        raw_commit = raw.get("commit")
+        if isinstance(raw_commit, dict):
+            raw_commit_cid = raw_commit.get("cid")
+            if isinstance(raw_commit_cid, str) and raw_commit_cid:
+                return raw_commit_cid
+
     key = msg.key()
-    if key is None:
-        return None
     if isinstance(key, bytes):
         return key.decode("utf-8", errors="replace")
-    return str(key)
+    if isinstance(key, str):
+        return key
+    return None
 
 
 def decode_json_payload(msg: Message) -> dict[str, Any] | None:
@@ -158,147 +131,102 @@ def decode_json_payload(msg: Message) -> dict[str, Any] | None:
     return payload
 
 
-def insert_raw_post(cursor: Any, msg: Message, payload: dict[str, Any]) -> None:
-    record = payload.get("record") or {}
+def extract_raw(payload: dict[str, Any]) -> Any:
+    if "raw" in payload:
+        return payload["raw"]
+    return payload
+
+def extract_embedding_literal(payload: dict[str, Any]) -> str | None:
+    embedding = payload.get("embedding")
+    if not isinstance(embedding, list):
+        return None
+    values: list[str] = []
+    for value in embedding:
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return None
+        values.append(f"{number:.10f}")
+    if not values:
+        return None
+    return "[" + ",".join(values) + "]"
+
+
+TOPIC_TABLE_MAP: dict[str, str] = {
+    "source_raw": "raw_messages",
+    "source_clean": "source_clean",
+    "embedding_requests": "embedding_requests",
+    "vector_embedding": "vector_embeddings",
+    "attention_ticket": "attention_tickets",
+    "annotations": "annotations",
+    "decision_packet": "decision_packets",
+}
+
+def insert_topic_payload(cursor: Any, table_name: str, msg: Message, payload: dict[str, Any]) -> None:
+    cid = extract_cid(msg, payload)
     cursor.execute(
-        """
-        INSERT INTO raw_posts (
-            kafka_topic, kafka_partition, kafka_offset, message_key,
-            source, author_did, uri, cid, operation, collection,
-            post_text, event_ts, received_at, payload
-        )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        f"""
+        INSERT INTO {table_name} (kafka_topic, kafka_partition, kafka_offset, cid, payload, raw)
+        VALUES (%s, %s, %s, %s, %s, %s)
         ON CONFLICT (kafka_topic, kafka_partition, kafka_offset) DO NOTHING
         """,
         (
             msg.topic(),
             msg.partition(),
             msg.offset(),
-            decode_message_key(msg),
-            payload.get("source"),
-            payload.get("did"),
-            payload.get("uri"),
-            payload.get("cid"),
-            payload.get("operation"),
-            payload.get("collection"),
-            record.get("text"),
-            epoch_ms_to_utc(payload.get("time_us", 0) // 1000 if isinstance(payload.get("time_us"), int) else None),
-            epoch_ms_to_utc(payload.get("received_at_ms")),
+            cid,
             Json(payload),
+            Json(extract_raw(payload)),
         ),
     )
 
-
-def insert_enriched_post(cursor: Any, msg: Message, payload: dict[str, Any]) -> None:
-    cursor.execute(
-        """
-        INSERT INTO enriched_posts (
-            kafka_topic, kafka_partition, kafka_offset, message_key,
-            pipeline_version, source, author_did, uri, cid,
-            langs, post_text, features, candidate, event_ts, received_at, payload
+def insert_vector_embedding_payload(cursor: Any, msg: Message, payload: dict[str, Any]) -> None:
+    cid = extract_cid(msg, payload)
+    embedding_literal = extract_embedding_literal(payload)
+    if embedding_literal is None:
+        cursor.execute(
+            """
+            INSERT INTO vector_embeddings (kafka_topic, kafka_partition, kafka_offset, cid, payload, raw)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            ON CONFLICT (kafka_topic, kafka_partition, kafka_offset) DO NOTHING
+            """,
+            (
+                msg.topic(),
+                msg.partition(),
+                msg.offset(),
+                cid,
+                Json(payload),
+                Json(extract_raw(payload)),
+            ),
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        ON CONFLICT (kafka_topic, kafka_partition, kafka_offset) DO NOTHING
-        """,
-        (
-            msg.topic(),
-            msg.partition(),
-            msg.offset(),
-            decode_message_key(msg),
-            payload.get("pipeline_version"),
-            payload.get("source"),
-            payload.get("author_did"),
-            payload.get("uri"),
-            payload.get("cid"),
-            Json(payload.get("langs") if isinstance(payload.get("langs"), list) else []),
-            payload.get("text"),
-            Json(payload.get("features") if isinstance(payload.get("features"), dict) else {}),
-            Json(payload.get("candidate") if isinstance(payload.get("candidate"), dict) else {}),
-            epoch_ms_to_utc(payload.get("event_ts_ms")),
-            epoch_ms_to_utc(payload.get("received_at_ms")),
-            Json(payload),
-        ),
-    )
-
-
-def insert_strategy_signal(cursor: Any, msg: Message, payload: dict[str, Any]) -> None:
-    features = payload.get("features") if isinstance(payload.get("features"), dict) else {}
-    candidate = payload.get("candidate") if isinstance(payload.get("candidate"), dict) else {}
-    signal_type = "final" if msg.topic() == "strategy_signal_final" else "candidate"
-
-    cursor.execute(
-        """
-        INSERT INTO strategy_signals (
-            kafka_topic, kafka_partition, kafka_offset, message_key,
-            signal_type, pipeline_version, source, author_did, uri, cid,
-            score, is_candidate, reasons, tickers, hashtags, keyword_hits,
-            sentiment_score, author_posts_5m, event_ts, received_at, payload
-        )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        ON CONFLICT (kafka_topic, kafka_partition, kafka_offset) DO NOTHING
-        """,
-        (
-            msg.topic(),
-            msg.partition(),
-            msg.offset(),
-            decode_message_key(msg),
-            signal_type,
-            payload.get("pipeline_version"),
-            payload.get("source"),
-            payload.get("author_did"),
-            payload.get("uri"),
-            payload.get("cid"),
-            int(candidate.get("score")) if isinstance(candidate.get("score"), int) else None,
-            bool(candidate.get("is_candidate")) if "is_candidate" in candidate else None,
-            Json(candidate.get("reasons") if isinstance(candidate.get("reasons"), list) else []),
-            Json(features.get("tickers") if isinstance(features.get("tickers"), list) else []),
-            Json(features.get("hashtags") if isinstance(features.get("hashtags"), list) else []),
-            Json(features.get("keyword_hits") if isinstance(features.get("keyword_hits"), list) else []),
-            int(features.get("sentiment_score")) if isinstance(features.get("sentiment_score"), int) else None,
-            int(features.get("author_posts_5m")) if isinstance(features.get("author_posts_5m"), int) else None,
-            epoch_ms_to_utc(payload.get("event_ts_ms")),
-            epoch_ms_to_utc(payload.get("received_at_ms")),
-            Json(payload),
-        ),
-    )
-
-
-def insert_llm_insight(cursor: Any, payload: dict[str, Any]) -> None:
-    llm = payload.get("llm_insight") if isinstance(payload.get("llm_insight"), dict) else {}
-    if not llm:
         return
 
     cursor.execute(
         """
-        INSERT INTO llm_insights (
-            strategy_signal_id, model_name, summary, risk_tags, recommendation, confidence, payload
-        )
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        INSERT INTO vector_embeddings (kafka_topic, kafka_partition, kafka_offset, cid, payload, embedding_vec, raw)
+        VALUES (%s, %s, %s, %s, %s, %s::vector, %s)
+        ON CONFLICT (kafka_topic, kafka_partition, kafka_offset) DO NOTHING
         """,
         (
-            None,
-            llm.get("model_name"),
-            llm.get("summary"),
-            Json(llm.get("risk_tags") if isinstance(llm.get("risk_tags"), list) else []),
-            llm.get("recommendation"),
-            llm.get("confidence"),
-            Json(llm),
+            msg.topic(),
+            msg.partition(),
+            msg.offset(),
+            cid,
+            Json(payload),
+            embedding_literal,
+            Json(extract_raw(payload)),
         ),
     )
 
 
 def route_and_insert(cursor: Any, msg: Message, payload: dict[str, Any]) -> bool:
     topic = msg.topic()
-    if topic == "bluesky_raw":
-        insert_raw_post(cursor, msg, payload)
+    if topic == "vector_embedding":
+        insert_vector_embedding_payload(cursor, msg, payload)
         return True
-    if topic == "bluesky_enriched":
-        insert_enriched_post(cursor, msg, payload)
-        return True
-    if topic in {"strategy_signal_candidate", "strategy_signal_final"}:
-        insert_strategy_signal(cursor, msg, payload)
-        if topic == "strategy_signal_final":
-            insert_llm_insight(cursor, payload)
+    table_name = TOPIC_TABLE_MAP.get(topic)
+    if table_name is not None:
+        insert_topic_payload(cursor, table_name, msg, payload)
         return True
     return False
 
@@ -371,7 +299,6 @@ def run() -> None:
         level=getattr(logging, args.log_level.upper(), logging.INFO),
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
-    init_tracing(os.getenv("OTEL_SERVICE_NAME", "sink-consumer"))
     start_http_server(args.metrics_port)
     topics = parse_topics(args.topics)
     conn = wait_for_db(args)
@@ -404,7 +331,7 @@ def run() -> None:
                 code = error.code()
                 if code == KafkaError._PARTITION_EOF:
                     continue
-                # Topics like bluesky_enriched may not exist until Flink starts and creates them.
+                # Topics may not exist until upstream services start and create them.
                 if code == unknown_topic_code:
                     LOGGER.warning("topic not ready yet: %s", error)
                     time.sleep(2.0)
@@ -412,64 +339,52 @@ def run() -> None:
                 raise KafkaException(error)
 
             topic = msg.topic()
-            incoming_carrier = kafka_headers_to_carrier(msg.headers())
             payload = decode_json_payload(msg)
-            if payload and isinstance(payload.get("traceparent"), str):
-                incoming_carrier.setdefault("traceparent", payload.get("traceparent", ""))
-            parent_context = propagate.extract(incoming_carrier)
+            if payload is None:
+                MESSAGES_TOTAL.labels(topic=topic, status="invalid_payload").inc()
+                LOGGER.warning(
+                    "skip invalid payload topic=%s partition=%s offset=%s",
+                    topic,
+                    msg.partition(),
+                    msg.offset(),
+                )
+                commit_with_retry(consumer, msg)
+                continue
 
-            with TRACER.start_as_current_span("sink_consume_span", context=parent_context) as consume_span:
-                consume_span.set_attribute("messaging.system", "kafka")
-                consume_span.set_attribute("messaging.operation", "process")
-                consume_span.set_attribute("messaging.destination.name", topic)
-                consume_span.set_attribute("messaging.kafka.partition", int(msg.partition()))
-                consume_span.set_attribute("messaging.kafka.offset", int(msg.offset()))
-                if payload is None:
-                    MESSAGES_TOTAL.labels(topic=topic, status="invalid_payload").inc()
-                    LOGGER.warning(
-                        "skip invalid payload topic=%s partition=%s offset=%s",
-                        topic,
-                        msg.partition(),
-                        msg.offset(),
-                    )
-                    commit_with_retry(consumer, msg)
-                    continue
-
-                try:
-                    with TRACER.start_as_current_span("sink_db_write_span"):
-                        with DB_WRITE_LATENCY_SECONDS.labels(topic=topic).time():
-                            with conn.cursor() as cursor:
-                                inserted = route_and_insert(cursor, msg, payload)
-                                if not inserted:
-                                    LOGGER.warning("skip unsupported topic topic=%s", topic)
-                                    MESSAGES_TOTAL.labels(topic=topic, status="unsupported_topic").inc()
-                                    conn.commit()
-                                    commit_with_retry(consumer, msg)
-                                    continue
+            try:
+                with DB_WRITE_LATENCY_SECONDS.labels(topic=topic).time():
+                    with conn.cursor() as cursor:
+                        inserted = route_and_insert(cursor, msg, payload)
+                        if not inserted:
+                            LOGGER.warning("skip unsupported topic topic=%s", topic)
+                            MESSAGES_TOTAL.labels(topic=topic, status="unsupported_topic").inc()
                             conn.commit()
-                    DB_WRITES_TOTAL.labels(topic=topic, status="success").inc()
-                    LAST_SUCCESSFUL_WRITE_UNIXTIME.set(time.time())
-                    MESSAGES_TOTAL.labels(topic=topic, status="processed").inc()
-                    with TRACER.start_as_current_span("sink_commit_span"):
-                        if not commit_with_retry(consumer, msg):
-                            LOGGER.error(
-                                "give up committing offset topic=%s partition=%s offset=%s",
-                                topic,
-                                msg.partition(),
-                                msg.offset(),
-                            )
-                except Exception as exc:
-                    conn.rollback()
-                    DB_WRITES_TOTAL.labels(topic=topic, status="error").inc()
-                    MESSAGES_TOTAL.labels(topic=topic, status="db_error").inc()
+                            commit_with_retry(consumer, msg)
+                            continue
+                    conn.commit()
+                DB_WRITES_TOTAL.labels(topic=topic, status="success").inc()
+                LAST_SUCCESSFUL_WRITE_UNIXTIME.set(time.time())
+                MESSAGES_TOTAL.labels(topic=topic, status="processed").inc()
+                committed = commit_with_retry(consumer, msg)
+                if not committed:
                     LOGGER.error(
-                        "db write failed topic=%s partition=%s offset=%s error=%s",
+                        "give up committing offset topic=%s partition=%s offset=%s",
                         topic,
                         msg.partition(),
                         msg.offset(),
-                        exc,
                     )
-                    time.sleep(1.0)
+            except Exception as exc:
+                conn.rollback()
+                DB_WRITES_TOTAL.labels(topic=topic, status="error").inc()
+                MESSAGES_TOTAL.labels(topic=topic, status="db_error").inc()
+                LOGGER.error(
+                    "db write failed topic=%s partition=%s offset=%s error=%s",
+                    topic,
+                    msg.partition(),
+                    msg.offset(),
+                    exc,
+                )
+                time.sleep(1.0)
     finally:
         consumer.close()
         conn.close()

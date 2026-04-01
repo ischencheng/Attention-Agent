@@ -9,22 +9,29 @@ groups:
       - record: pipeline_e2e_success_ratio:5m
         expr: |
           clamp_max(
-            sum(rate(signals_final_total[5m])) /
-            clamp_min(sum(rate(signals_candidate_total[5m])), 0.000001),
+            sum(rate(decision_packet_out_total{status="success"}[5m])) /
+            clamp_min(sum(rate(narrative_clue_out_total{status="success"}[5m])), 0.000001),
             1
           )
       - record: pipeline_e2e_error_ratio:5m
         expr: |
           clamp_max(
-            sum(rate(llm_requests_total{status="error"}[5m])) /
-            clamp_min(sum(rate(llm_requests_total[5m])), 0.000001),
+            sum(rate(strong_agent_requests_total{status="error"}[5m])) /
+            clamp_min(sum(rate(strong_agent_requests_total[5m])), 0.000001),
             1
           )
       - record: pipeline_trace_completeness_ratio:5m
         expr: |
           clamp_max(
-            sum(rate(signals_final_total[5m])) /
+            sum(rate(decision_packet_out_total{status="success"}[5m])) /
             clamp_min(sum(rate(bluesky_ingestor_raw_publish_success_total[5m])), 0.000001),
+            1
+          )
+      - record: local_ml_filter_pass_ratio:5m
+        expr: |
+          clamp_max(
+            sum(rate(local_ml_filter_total{decision="pass"}[5m])) /
+            clamp_min(sum(rate(local_ml_filter_total[5m])), 0.000001),
             1
           )
       - record: pipeline_freshness_seconds
@@ -51,14 +58,14 @@ groups:
           summary: "Pipeline trace completeness is low"
           description: "Final output compared to ingest success is below expected baseline."
 
-      - alert: LLMErrorRateHigh
+      - alert: StrongAgentErrorRateHigh
         expr: pipeline_e2e_error_ratio:5m > 0.05
         for: 10m
         labels:
           severity: critical
         annotations:
-          summary: "LLM error ratio is high"
-          description: "LLM request error ratio has been above 5% for 10 minutes."
+          summary: "Strong agent error ratio is high"
+          description: "Strong agent request error ratio has been above 5% for 10 minutes."
 
       - alert: SinkConsumerNoRecentWrite
         expr: pipeline_freshness_seconds > 120
@@ -69,11 +76,11 @@ groups:
           summary: "Sink consumer appears stalled"
           description: "No successful sink DB write in the last 2 minutes."
 
-      - alert: KafkaLagHighCandidateFinal
-        expr: sum(kafka_consumergroup_lag{topic=~"strategy_signal_candidate|strategy_signal_final"}) > 10000
+      - alert: KafkaLagHighAgentPipeline
+        expr: sum(kafka_consumergroup_lag{topic=~"narrative_clue|event_packet|decision_packet"}) > 10000
         for: 10m
         labels:
           severity: warning
         annotations:
-          summary: "Candidate/final consumer lag is high"
-          description: "Consumer lag on candidate/final topics exceeded 10k for 10 minutes."
+          summary: "Agent pipeline consumer lag is high"
+          description: "Consumer lag on narrative/event/decision topics exceeded 10k for 10 minutes."

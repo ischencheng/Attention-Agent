@@ -1,6 +1,6 @@
 # Kafka Pipeline Observability Guide
 
-This guide defines the observability model for the Bluesky -> Kafka -> Flink -> LLM -> Postgres -> API -> React pipeline.
+This guide defines the observability model for the Bluesky -> Kafka -> Flink -> Fast Agent -> Mid Agent -> Strong Agent -> Postgres pipeline.
 
 It covers three layers:
 
@@ -26,10 +26,8 @@ It covers three layers:
 
 - `bluesky_ingestor_events_received_total`: Jetstream events received.
 - `bluesky_ingestor_events_filtered_total{reason}`: events dropped by filter reason.
-- `bluesky_ingestor_raw_publish_success_total`: successful writes to `bluesky_raw`.
-- `bluesky_ingestor_raw_publish_failed_total{error_type}`: failed writes to `bluesky_raw`.
-- `bluesky_ingestor_dlq_publish_success_total`: successful writes to DLQ.
-- `bluesky_ingestor_dlq_publish_failed_total{error_type}`: failed writes to DLQ.
+- `bluesky_ingestor_raw_publish_success_total`: successful writes to `source_raw`.
+- `bluesky_ingestor_raw_publish_failed_total{error_type}`: failed writes to `source_raw`.
 - `bluesky_ingestor_reconnect_total`: reconnect attempts to Jetstream.
 - `bluesky_ingestor_last_event_unixtime`: timestamp of latest source event.
 
@@ -51,20 +49,21 @@ Useful PromQL patterns:
 - checkpoint failures (example): `sum(rate(flink_taskmanager_job_task_numRecordsInErrors[5m]))`
 - busy ratio (depends on exposed metric names): query `flink_*busy*` series in Prometheus explore first.
 
-### llm-worker
+### fast-agent / mid-agent / strong-agent
 
-- `llm_requests_total{status}`: total cloud LLM requests by status.
-- `llm_errors_total`: total LLM errors.
-- `llm_latency_seconds`: LLM request latency histogram.
-- `llm_cost_usd_total`: estimated LLM cost.
-- `signals_candidate_total`: candidate signals consumed.
-- `signals_final_total`: final signals produced.
-- `signals_drop_total`: dropped invalid payloads.
+- `local_ml_eval_total{result}`: local ML classifier pass/filter counters.
+- `local_ml_score`: local ML classifier relevance-score histogram.
+- `narrative_clue_out_total{status}`: fast-agent clue output counters.
+- `event_packet_out_total{status}`: mid-agent event packet output counters.
+- `strong_agent_requests_total{status}`: strong-agent external request counters.
+- `strong_agent_latency_seconds`: strong-agent request latency histogram.
+- `decision_packet_out_total{status}`: strong-agent decision packet output counters.
 
 Useful PromQL:
 
-- LLM P95: `histogram_quantile(0.95, sum(rate(llm_latency_seconds_bucket[5m])) by (le))`
-- LLM error ratio: `sum(rate(llm_requests_total{status="error"}[5m])) / clamp_min(sum(rate(llm_requests_total[5m])), 0.000001)`
+- local ML pass ratio: `sum(rate(local_ml_eval_total{result="passed"}[5m])) / clamp_min(sum(rate(local_ml_eval_total[5m])), 0.000001)`
+- strong agent P95: `histogram_quantile(0.95, sum(rate(strong_agent_latency_seconds_bucket[5m])) by (le))`
+- strong agent error ratio: `sum(rate(strong_agent_requests_total{status="error"}[5m])) / clamp_min(sum(rate(strong_agent_requests_total[5m])), 0.000001)`
 
 ### sink-consumer
 
@@ -133,8 +132,10 @@ Suggested SLO baseline:
 - `ingest.receive`
   - `kafka.produce`
 - `flink.transform.normalize`
-- `llm.invoke.batch`
-- `llm.enrich`
+- `fast_agent.triage`
+- `mid_agent.consume_clue`
+- `mid_agent.aggregate`
+- `strong_agent.decision`
   - `kafka.produce`
 - `sink_consume_span`
   - `sink_db_write_span`
@@ -151,13 +152,13 @@ Suggested SLO baseline:
 Across Kafka boundaries, context is propagated via:
 
 - Kafka headers (`traceparent` from OTel propagator)
-- payload fallback field `traceparent` (used by Flink / worker paths)
+- payload field `traceparent` (used by Flink / agent paths)
 
-This allows one business event to be traced across ingestor -> flink -> llm -> sink -> api.
+This allows one business event to be traced across ingestor -> flink -> fast-agent -> mid-agent -> strong-agent -> sink.
 
 ### Jaeger usage
 
-- Search by service: `bluesky-ingestor`, `flink-job`, `llm-worker`, `sink-consumer`, `backend-fastapi`
+- Search by service: `bluesky-ingestor`, `flink-normalizer`, `fast-agent`, `mid-agent`, `strong-agent`, `sink-consumer`
 - Filter by operation names above
 - Compare slow traces to normal traces using operation duration breakdown
 
@@ -174,7 +175,7 @@ This allows one business event to be traced across ingestor -> flink -> llm -> s
 Yes. Use PostgreSQL datasource and SQL panels.
 
 Prometheus panels show time-series metrics, not row payloads.  
-SQL panels can show concrete records from `strategy_signals`, `raw_posts`, `enriched_posts`, `llm_insights`.
+SQL panels can show concrete records from `raw_messages`, `narrative_clues`, `event_packets`, `decision_packets`.
 
 The dashboard `pipeline-data-explorer.json` provides:
 
@@ -190,7 +191,10 @@ After `docker compose up -d --build`:
    - `bluesky_ingestor`
    - `flink_jobmanager`
    - `flink_taskmanager`
-   - `llm_worker`
+   - `local_ml_filter`
+   - `fast_agent`
+   - `mid_agent`
+   - `strong_agent`
    - `sink_consumer`
    - `backend_fastapi`
    - `postgres_exporter`

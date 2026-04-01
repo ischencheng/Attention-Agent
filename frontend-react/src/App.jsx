@@ -22,23 +22,19 @@ function fmtTime(ts) {
 }
 
 export default function App() {
-  const [signals, setSignals] = useState([]);
-  const [insights, setInsights] = useState([]);
+  const [chains, setChains] = useState([]);
   const [overview, setOverview] = useState({ candidate_count: 0, final_count: 0 });
   const [wsState, setWsState] = useState("connecting");
   const wsUrl = useMemo(() => buildWsUrl(), []);
 
   async function loadInitial() {
-    const [signalRes, insightRes, overviewRes] = await Promise.all([
-      fetch(buildApiUrl("/api/signals?signal_type=final&limit=50")),
-      fetch(buildApiUrl("/api/insights?limit=20")),
+    const [chainsRes, overviewRes] = await Promise.all([
+      fetch(buildApiUrl("/api/decision-chains?limit=20")),
       fetch(buildApiUrl("/api/overview")),
     ]);
-    const signalData = await signalRes.json();
-    const insightData = await insightRes.json();
+    const chainsData = await chainsRes.json();
     const overviewData = await overviewRes.json();
-    setSignals(Array.isArray(signalData.items) ? signalData.items : []);
-    setInsights(Array.isArray(insightData.items) ? insightData.items : []);
+    setChains(Array.isArray(chainsData.items) ? chainsData.items : []);
     setOverview(overviewData || {});
   }
 
@@ -62,7 +58,7 @@ export default function App() {
       try {
         const message = JSON.parse(event.data);
         if (message.event !== "strategy_signal_final" || !message.data) return;
-        setSignals((prev) => [message.data, ...prev].slice(0, 100));
+        loadInitial().catch(() => undefined);
         setOverview((prev) => ({ ...prev, final_count: (prev.final_count || 0) + 1 }));
       } catch {
         // ignore malformed messages
@@ -95,44 +91,59 @@ export default function App() {
 
       <section className="grid">
         <article className="panel">
-          <h2>Final strategy signals</h2>
-          <table>
-            <thead>
-              <tr>
-                <th>time</th>
-                <th>author</th>
-                <th>score</th>
-                <th>tickers</th>
-                <th>summary</th>
-              </tr>
-            </thead>
-            <tbody>
-              {signals.map((signal) => {
-                const payload = signal.payload || {};
-                const llm = payload.llm_insight || {};
-                return (
-                  <tr key={signal.id}>
-                    <td>{fmtTime(signal.event_ts || signal.created_at)}</td>
-                    <td>{signal.author_did || "-"}</td>
-                    <td>{signal.score ?? "-"}</td>
-                    <td>{Array.isArray(signal.tickers) ? signal.tickers.join(", ") : "-"}</td>
-                    <td>{llm.summary || "-"}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </article>
+          <h2>Decision Workbench (Phase 4)</h2>
+          <ul className="chains">
+            {chains.map((item) => {
+              const decision = item.decision || {};
+              const annotations = Array.isArray(item.annotations) ? item.annotations : [];
+              return (
+                <li key={decision.id || decision.cid}>
+                  <div className="chain-head">
+                    <strong>{decision.cid || "unknown cid"}</strong>
+                    <span>{fmtTime(decision.created_at)}</span>
+                  </div>
+                  <p>
+                    <strong>report</strong>
+                  </p>
+                  <p>{decision.report || "-"}</p>
 
-        <article className="panel">
-          <h2>Latest LLM insights</h2>
-          <ul className="insights">
-            {insights.map((insight) => (
-              <li key={insight.id}>
-                <strong>{insight.model_name || "unknown-model"}</strong>
-                <p>{insight.summary || "-"}</p>
+                  <div className="chain-subsection">
+                    <h4>Annotations</h4>
+                    {annotations.length === 0 && <p className="muted">No linked annotations</p>}
+                    {annotations.map((annotation) => {
+                      const raws = Array.isArray(annotation.raw_messages) ? annotation.raw_messages : [];
+                      return (
+                        <div className="annotation" key={annotation.cid || "annotation"}>
+                          <p>
+                            <strong>cid</strong>: {annotation.cid || "-"}
+                          </p>
+                          <p className="muted">
+                            mid_agent_relevant_cids=
+                            {Array.isArray(annotation.mid_agent_relevant_cids)
+                              ? annotation.mid_agent_relevant_cids.join(", ")
+                              : "-"}
+                          </p>
+                          <p className="muted">related raw={raws.length}</p>
+                          {raws.map((raw) => (
+                            <div className="raw" key={raw.cid || "raw"}>
+                              <p>
+                                <strong>{raw.cid || "unknown-cid"}</strong> · {fmtTime(raw.created_at)}
+                              </p>
+                              <p>{raw.text || "-"}</p>
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </li>
+              );
+            })}
+            {chains.length === 0 && (
+              <li>
+                <p className="muted">No decision chains yet.</p>
               </li>
-            ))}
+            )}
           </ul>
         </article>
       </section>

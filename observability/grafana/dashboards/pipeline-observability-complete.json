@@ -78,8 +78,8 @@
       "gridPos": { "h": 4, "w": 4, "x": 20, "y": 0 },
       "id": 6,
       "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "center", "textMode": "value", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
-      "targets": [{ "expr": "rate(llm_cost_usd_total[5m]) * 60", "refId": "A" }],
-      "title": "LLM Cost / Min",
+      "targets": [{ "expr": "local_ml_filter_pass_ratio:5m", "refId": "A" }],
+      "title": "Local ML Pass Ratio",
       "type": "stat"
     },
     {
@@ -90,11 +90,11 @@
       "options": { "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "single", "sort": "none" } },
       "targets": [
         { "expr": "rate(bluesky_ingestor_raw_publish_success_total[5m])", "legendFormat": "ingestor_raw_success", "refId": "A" },
-        { "expr": "rate(signals_candidate_total[5m])", "legendFormat": "candidate_in", "refId": "B" },
-        { "expr": "rate(signals_final_total[5m])", "legendFormat": "final_out", "refId": "C" },
-        { "expr": "rate(signals_drop_total[5m])", "legendFormat": "dropped", "refId": "D" }
+        { "expr": "rate(narrative_clue_out_total{status=\"success\"}[5m])", "legendFormat": "narrative_clue_out", "refId": "B" },
+        { "expr": "rate(event_packet_out_total{status=\"success\"}[5m])", "legendFormat": "event_packet_out", "refId": "C" },
+        { "expr": "rate(decision_packet_out_total{status=\"success\"}[5m])", "legendFormat": "decision_packet_out", "refId": "D" }
       ],
-      "title": "Pipeline Signal Flow",
+      "title": "Pipeline Packet Flow",
       "type": "timeseries"
     },
     {
@@ -106,7 +106,7 @@
       "targets": [
         { "expr": "histogram_quantile(0.5, sum(rate(signal_end_to_end_latency_seconds_bucket[5m])) by (le))", "legendFormat": "E2E P50", "refId": "A" },
         { "expr": "histogram_quantile(0.95, sum(rate(signal_end_to_end_latency_seconds_bucket[5m])) by (le))", "legendFormat": "E2E P95", "refId": "B" },
-        { "expr": "histogram_quantile(0.95, sum(rate(llm_latency_seconds_bucket[5m])) by (le))", "legendFormat": "LLM P95", "refId": "C" }
+        { "expr": "histogram_quantile(0.95, sum(rate(strong_agent_latency_seconds_bucket[5m])) by (le))", "legendFormat": "Strong Agent P95", "refId": "C" }
       ],
       "title": "Latency Trends",
       "type": "timeseries"
@@ -118,9 +118,9 @@
       "id": 9,
       "options": { "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "single", "sort": "none" } },
       "targets": [
-        { "expr": "sum by (consumergroup, topic) (kafka_consumergroup_lag{topic=~\"strategy_signal_candidate|strategy_signal_final\"})", "legendFormat": "{{consumergroup}}/{{topic}}", "refId": "A" }
+        { "expr": "sum by (consumergroup, topic) (kafka_consumergroup_lag{topic=~\"narrative_clue|event_packet|decision_packet\"})", "legendFormat": "{{consumergroup}}/{{topic}}", "refId": "A" }
       ],
-      "title": "Kafka Lag (Candidate/Final)",
+      "title": "Kafka Lag (Narrative/Event/Decision)",
       "type": "timeseries"
     },
     {

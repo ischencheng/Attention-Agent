@@ -1,6 +1,6 @@
 services:
   kafka1:
-    image: apache/kafka:latest
+    image: apache/kafka:3.7.1
     container_name: kafka1
     hostname: kafka1
     networks: [backend]
@@ -56,7 +56,7 @@ services:
       start_period: 20s
 
   kafka2:
-    image: apache/kafka:latest
+    image: apache/kafka:3.7.1
     container_name: kafka2
     hostname: kafka2
     networks: [backend]
@@ -91,7 +91,7 @@ services:
       start_period: 20s
 
   kafka3:
-    image: apache/kafka:latest
+    image: apache/kafka:3.7.1
     container_name: kafka3
     hostname: kafka3
     networks: [backend]
@@ -178,17 +178,11 @@ services:
       - "--bootstrap"
       - "kafka1:19092,kafka2:19092,kafka3:19092"
       - "--topic"
-      - "bluesky_raw"
-      - "--dlq-topic"
-      - "bluesky_raw_dlq"
+      - "source_raw"
       - "--jetstream-url"
       - "wss://jetstream2.us-east.bsky.network/subscribe"
       - "--metrics-port"
       - "8020"
-      - "--max-produce-retries"
-      - "5"
-      - "--produce-retry-backoff-seconds"
-      - "0.5"
     ports:
       - "8020:8020"
     restart: unless-stopped
@@ -258,18 +252,19 @@ services:
     environment:
       OTEL_SERVICE_NAME: flink-job
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      INVESTMENT_KEYWORDS: "ai,earnings,guidance,capex,datacenter,storage,power,energy,nuclear,semiconductor,gpu,inference,llm,margin,valuation,cpi,fed,yield"
     command:
       - "/bin/sh"
       - "-c"
-      - "until curl -fsS http://flink-jobmanager:8081/overview > /dev/null; do sleep 2; done; flink run -m flink-jobmanager:8081 -d -py /opt/flink/usrlib/bluesky_flink_job.py --bootstrap kafka1:19092,kafka2:19092,kafka3:19092 --raw-topic bluesky_raw --enriched-topic bluesky_enriched --candidate-topic strategy_signal_candidate --startup-mode earliest --checkpoint-interval-ms 10000 --parallelism 1"
-    restart: on-failure
+      - "until curl -fsS http://flink-jobmanager:8081/overview > /dev/null; do sleep 2; done; if flink list -m flink-jobmanager:8081 -r | grep -q \"source-raw-to-clean-and-embedding\"; then echo \"flink job already running; skip submit\"; else flink run -m flink-jobmanager:8081 -d -py /opt/flink/usrlib/bluesky_flink_job.py --bootstrap kafka1:19092,kafka2:19092,kafka3:19092 --raw-topic source_raw --clean-topic source_clean --startup-mode earliest --parallelism 1; fi; tail -f /dev/null"
+    restart: unless-stopped
     depends_on:
       - flink-jobmanager
       - flink-taskmanager
       - otel-collector
 
   postgres:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
     container_name: postgres
     hostname: postgres
     networks: [backend]
@@ -321,7 +316,7 @@ services:
       - "--bootstrap"
       - "kafka1:19092,kafka2:19092,kafka3:19092"
       - "--topics"
-      - "bluesky_raw,bluesky_enriched,strategy_signal_candidate,strategy_signal_final"
+      - "source_raw,source_clean,vector_embedding,attention_ticket,annotations,decision_packet"
       - "--group-id"
       - "sink-postgres-v1"
       - "--db-host"
@@ -351,17 +346,98 @@ services:
       otel-collector:
         condition: service_started
 
-  llm-worker:
+  local-ml-filter:
     build:
       context: ./llm-worker
       dockerfile: Dockerfile
-    container_name: llm-worker
-    hostname: llm-worker
+    container_name: local-ml-filter
+    hostname: local-ml-filter
     networks: [backend]
     environment:
       PYTHONUNBUFFERED: "1"
       GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
-      OTEL_SERVICE_NAME: llm-worker
+      OTEL_SERVICE_NAME: local-ml-filter
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+    command:
+      - "python"
+      - "local_ml_filter.py"
+      - "--bootstrap"
+      - "kafka1:19092,kafka2:19092,kafka3:19092"
+      - "--input-topic"
+      - "source_clean"
+      - "--output-topic"
+      - "fastagent_input"
+      - "--group-id"
+      - "local-ml-filter-v1"
+      - "--threshold"
+      - "0.55"
+      - "--llm-provider"
+      - "gemini"
+      - "--llm-model"
+      - "gemini-2.5-flash-lite"
+      - "--llm-timeout-seconds"
+      - "12"
+      - "--metrics-port"
+      - "8031"
+    ports:
+      - "8031:8031"
+    restart: unless-stopped
+    depends_on:
+      kafka1:
+        condition: service_healthy
+      kafka2:
+        condition: service_healthy
+      kafka3:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+
+  embed-worker:
+    build:
+      context: ./llm-worker
+      dockerfile: Dockerfile
+    container_name: embed-worker
+    hostname: embed-worker
+    networks: [backend]
+    environment:
+      PYTHONUNBUFFERED: "1"
+      GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
+      OTEL_SERVICE_NAME: embed-worker
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+    command:
+      - "python"
+      - "embed_worker.py"
+      - "--bootstrap"
+      - "kafka1:19092,kafka2:19092,kafka3:19092"
+      - "--input-topic"
+      - "source_clean"
+      - "--output-topic"
+      - "vector_embedding"
+      - "--group-id"
+      - "embed-worker-v1"
+      - "--embedding-provider"
+      - "gemini"
+      - "--embedding-model"
+      - "gemini-embedding-001"
+      - "--embedding-dim"
+      - "768"
+      - "--embedding-timeout-seconds"
+      - "15"
+      - "--metrics-port"
+      - "8034"
+    ports:
+      - "8034:8034"
+  fast-agent:
+    build:
+      context: ./llm-worker
+      dockerfile: Dockerfile
+    container_name: fast-agent
+    hostname: fast-agent
+    networks: [backend]
+    environment:
+      PYTHONUNBUFFERED: "1"
+      GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
+      OTEL_SERVICE_NAME: fast-agent
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
     command:
       - "python"
@@ -369,23 +445,101 @@ services:
       - "--bootstrap"
       - "kafka1:19092,kafka2:19092,kafka3:19092"
       - "--input-topic"
-      - "strategy_signal_candidate"
+      - "fastagent_input"
       - "--output-topic"
-      - "strategy_signal_final"
+      - "attention_ticket"
       - "--group-id"
-      - "llm-worker-v1"
-      - "--metrics-port"
-      - "8030"
+      - "fast-agent-v1"
       - "--llm-provider"
       - "gemini"
       - "--llm-model"
       - "gemini-2.5-flash-lite"
-      - "--batch-size"
-      - "200"
-      - "--batch-max-wait-seconds"
-      - "600"
+      - "--llm-timeout-seconds"
+      - "12"
+      - "--metrics-port"
+      - "8030"
+      - "--attention-threshold"
+      - "0.60"
     ports:
       - "8030:8030"
+    restart: unless-stopped
+    depends_on:
+      kafka1:
+        condition: service_healthy
+      kafka2:
+        condition: service_healthy
+      kafka3:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+
+  mid-agent:
+    build:
+      context: ./ts-agents
+      dockerfile: Dockerfile
+    container_name: mid-agent
+    hostname: mid-agent
+    networks: [backend]
+    environment:
+      NODE_ENV: production
+      GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
+      GOOGLE_API_KEY: "${GEMINI_API_KEY:-}"
+      OTEL_SERVICE_NAME: mid-agent
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      KAFKA_BOOTSTRAP: kafka1:19092,kafka2:19092,kafka3:19092
+      KAFKA_GROUP_ID: mid-agent-ts-v1
+      INPUT_TOPIC: attention_ticket
+      OUTPUT_TOPIC: annotations
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: bluesky
+      DB_USER: bluesky
+      DB_PASSWORD: bluesky
+      MID_AGENT_MODEL: gemini-2.5-flash-lite
+    command:
+      - "node"
+      - "dist/mid-agent/index.js"
+    ports:
+      - "8032:8032"
+    restart: unless-stopped
+    depends_on:
+      kafka1:
+        condition: service_healthy
+      kafka2:
+        condition: service_healthy
+      kafka3:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+
+  strong-agent:
+    build:
+      context: ./ts-agents
+      dockerfile: Dockerfile
+    container_name: strong-agent
+    hostname: strong-agent
+    networks: [backend]
+    environment:
+      NODE_ENV: production
+      GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
+      GOOGLE_API_KEY: "${GEMINI_API_KEY:-}"
+      OTEL_SERVICE_NAME: strong-agent
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      KAFKA_BOOTSTRAP: kafka1:19092,kafka2:19092,kafka3:19092
+      KAFKA_GROUP_ID: strong-agent-ts-v1
+      INPUT_TOPIC: annotations
+      OUTPUT_TOPIC: decision_packet
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: bluesky
+      DB_USER: bluesky
+      DB_PASSWORD: bluesky
+      STRONG_AGENT_MODEL: gemini-2.5-flash-lite
+    command:
+      - "node"
+      - "dist/strong-agent/index.js"
+    ports:
+      - "8033:8033"
     restart: unless-stopped
     depends_on:
       kafka1:
@@ -479,7 +633,11 @@ services:
     depends_on:
       - kafka-exporter
       - bluesky-ingestor
-      - llm-worker
+      - local-ml-filter
+      - embed-worker
+      - fast-agent
+      - mid-agent
+      - strong-agent
       - backend-fastapi
       - sink-consumer
       - postgres-exporter
@@ -495,6 +653,8 @@ services:
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: admin
       GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SERVER_ROUTER_LOGGING: "true"
+      GF_LOG_LEVEL: info
     volumes:
       - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
