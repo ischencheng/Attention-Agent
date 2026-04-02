@@ -47,17 +47,10 @@ def decode_payload(raw: bytes | None) -> dict[str, Any] | None:
     return payload if isinstance(payload, dict) else None
 
 
-def extract_cid(payload: dict[str, Any]) -> str | None:
-    cid = payload.get("cid")
-    if isinstance(cid, str) and cid:
-        return cid
-    raw = payload.get("raw")
-    if isinstance(raw, dict):
-        commit = raw.get("commit")
-        if isinstance(commit, dict):
-            commit_cid = commit.get("cid")
-            if isinstance(commit_cid, str) and commit_cid:
-                return commit_cid
+def extract_source_id(payload: dict[str, Any]) -> str | None:
+    source_id = payload.get("source_id")
+    if isinstance(source_id, str) and source_id:
+        return source_id
     return None
 
 
@@ -69,16 +62,16 @@ def local_score(payload: dict[str, Any]) -> float:
 
 
 def build_message_text(payload: dict[str, Any]) -> str:
-    raw = payload.get("raw")
-    if isinstance(raw, dict):
-        commit = raw.get("commit")
-        if isinstance(commit, dict):
-            record = commit.get("record")
-            if isinstance(record, dict):
-                record_text = record.get("text")
-                if isinstance(record_text, str) and record_text.strip():
-                    return record_text.strip()
-    return json.dumps(payload, ensure_ascii=False)[:2000]
+    """Extract text from unified envelope format."""
+    data = payload.get("data") or {}
+    ct = payload.get("content_type", "")
+    if ct == "social_post":
+        return (data.get("text") or "").strip()
+    if ct == "news_article":
+        return f"{data.get('title', '')} {data.get('snippet', '')}".strip()
+    if ct == "price_tick":
+        return ""
+    return json.dumps(data, ensure_ascii=False)[:2000]
 
 
 def parse_yes_no(text: str) -> bool | None:
@@ -97,10 +90,18 @@ def get_gemini_yes_no(payload: dict[str, Any], model: str, api_key: str, timeout
     if not api_key:
         return None
     message_text = build_message_text(payload)
+    source = payload.get("source", "unknown")
+    content_type = payload.get("content_type", "unknown")
     prompt = (
-        "Please use common sense to judge whether this message is worth attention.\n"
+        "You are a quantitative trader using a disciplined investment framework.\n"
+        "Would you flag this for your morning brief? Apply these filters:\n"
+        "1. MOAT: Does it relate to a company with durable competitive advantage?\n"
+        "2. CYCLE: Does it signal a shift in business/credit/technology cycles?\n"
+        "3. NARRATIVE CHECK: Is this genuinely new information, or recycled noise?\n"
+        "4. MATERIALITY: Could this move a stock price or indicate macro regime change?\n"
+        "Fail ALL 4 = NO. Pass at least one = YES.\n"
         "Reply with only YES or NO.\n"
-        f"Message:\n{message_text}"
+        f"[{source} | {content_type}] {message_text}"
     )
     endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
     response = requests.post(
@@ -183,9 +184,14 @@ def main() -> None:
                 consumer.commit(message=msg, asynchronous=False)
                 continue
 
-            cid = extract_cid(payload)
-            if not cid:
+            source_id = extract_source_id(payload)
+            if not source_id:
                 FAST_AGENT_OUTPUT_TOTAL.labels("invalid_payload").inc()
+                consumer.commit(message=msg, asynchronous=False)
+                continue
+
+            # Skip price ticks — they don't need attention scoring
+            if payload.get("content_type") == "price_tick":
                 consumer.commit(message=msg, asynchronous=False)
                 continue
 
@@ -209,10 +215,12 @@ def main() -> None:
                 consumer.commit(message=msg, asynchronous=False)
                 continue
 
-            output = {"cid": cid, "raw": payload}
+            # Produce unified envelope with verdict enrichment
+            output = dict(payload)
+            output["verdict"] = "yes"
             producer.produce(
                 topic=args.output_topic,
-                key=cid.encode("utf-8"),
+                key=source_id.encode("utf-8"),
                 value=json.dumps(output, ensure_ascii=False).encode("utf-8"),
                 headers=msg.headers(),
             )

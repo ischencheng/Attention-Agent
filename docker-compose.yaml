@@ -40,7 +40,7 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
       KAFKA_DEFAULT_REPLICATION_FACTOR: 3
       KAFKA_MIN_INSYNC_REPLICAS: 2
-      KAFKA_LOG_RETENTION_MS: 600000
+      KAFKA_LOG_RETENTION_MS: 14400000
       KAFKA_LOG_RETENTION_CHECK_INTERVAL_MS: 60000
 
       # KRaft cluster id (must be same on all nodes)
@@ -78,7 +78,7 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
       KAFKA_DEFAULT_REPLICATION_FACTOR: 3
       KAFKA_MIN_INSYNC_REPLICAS: 2
-      KAFKA_LOG_RETENTION_MS: 600000
+      KAFKA_LOG_RETENTION_MS: 14400000
       KAFKA_LOG_RETENTION_CHECK_INTERVAL_MS: 60000
       CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qk"
     volumes:
@@ -113,7 +113,7 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
       KAFKA_DEFAULT_REPLICATION_FACTOR: 3
       KAFKA_MIN_INSYNC_REPLICAS: 2
-      KAFKA_LOG_RETENTION_MS: 600000
+      KAFKA_LOG_RETENTION_MS: 14400000
       KAFKA_LOG_RETENTION_CHECK_INTERVAL_MS: 60000
       CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qk"
     volumes:
@@ -163,6 +163,7 @@ services:
         condition: service_healthy
 
   bluesky-ingestor:
+    profiles: [extra-sources]
     build:
       context: ./bluesky-demo
       dockerfile: Dockerfile
@@ -376,7 +377,7 @@ services:
       - "--llm-model"
       - "gemini-2.5-flash-lite"
       - "--llm-timeout-seconds"
-      - "12"
+      - "30"
       - "--metrics-port"
       - "8031"
     ports:
@@ -410,11 +411,11 @@ services:
       - "--bootstrap"
       - "kafka1:19092,kafka2:19092,kafka3:19092"
       - "--input-topic"
-      - "source_clean"
+      - "fastagent_input"
       - "--output-topic"
       - "vector_embedding"
       - "--group-id"
-      - "embed-worker-v1"
+      - "embed-worker-v2"
       - "--embedding-provider"
       - "gemini"
       - "--embedding-model"
@@ -427,6 +428,17 @@ services:
       - "8034"
     ports:
       - "8034:8034"
+    restart: unless-stopped
+    depends_on:
+      kafka1:
+        condition: service_healthy
+      kafka2:
+        condition: service_healthy
+      kafka3:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+
   fast-agent:
     build:
       context: ./llm-worker
@@ -455,7 +467,7 @@ services:
       - "--llm-model"
       - "gemini-2.5-flash-lite"
       - "--llm-timeout-seconds"
-      - "12"
+      - "30"
       - "--metrics-port"
       - "8030"
       - "--attention-threshold"
@@ -473,83 +485,157 @@ services:
       otel-collector:
         condition: service_started
 
+  finnhub-ingestor:
+    profiles: [extra-sources]
+    build:
+      context: ./ingestors
+      dockerfile: Dockerfile
+    container_name: finnhub-ingestor
+    networks: [backend]
+    environment:
+      PYTHONUNBUFFERED: "1"
+      FINNHUB_API_KEY: "${FINNHUB_API_KEY:-}"
+    command:
+      - "python"
+      - "finnhub_ws.py"
+      - "--bootstrap"
+      - "kafka1:19092,kafka2:19092,kafka3:19092"
+      - "--topic"
+      - "source_raw"
+      - "--metrics-port"
+      - "8021"
+    ports:
+      - "8021:8021"
+    restart: unless-stopped
+    depends_on:
+      kafka1:
+        condition: service_healthy
+      kafka2:
+        condition: service_healthy
+      kafka3:
+        condition: service_healthy
+
+  polygon-news-ingestor:
+    profiles: [extra-sources]
+    build:
+      context: ./ingestors
+      dockerfile: Dockerfile
+    container_name: polygon-news-ingestor
+    networks: [backend]
+    environment:
+      PYTHONUNBUFFERED: "1"
+      POLYGON_API_KEY: "${POLYGON_API_KEY:-}"
+    command:
+      - "python"
+      - "polygon_news_poller.py"
+      - "--bootstrap"
+      - "kafka1:19092,kafka2:19092,kafka3:19092"
+      - "--topic"
+      - "source_raw"
+      - "--poll-interval-seconds"
+      - "60"
+      - "--metrics-port"
+      - "8022"
+    ports:
+      - "8022:8022"
+    restart: unless-stopped
+    depends_on:
+      kafka1:
+        condition: service_healthy
+      kafka2:
+        condition: service_healthy
+      kafka3:
+        condition: service_healthy
+
+  twitter-ingestor:
+    build:
+      context: ./ingestors
+      dockerfile: Dockerfile
+    container_name: twitter-ingestor
+    networks: [backend]
+    environment:
+      PYTHONUNBUFFERED: "1"
+      CARAVO_API_KEY: "${CARAVO_API_KEY:-}"
+    command:
+      - "python"
+      - "twitter_poller.py"
+      - "--bootstrap"
+      - "kafka1:19092,kafka2:19092,kafka3:19092"
+      - "--topic"
+      - "source_raw"
+      - "--twitter-username"
+      - "${TWITTER_FOLLOW_USER:-genhcnehcsi}"
+      - "--poll-interval-seconds"
+      - "1200"
+      - "--search-batch-size"
+      - "10"
+      - "--metrics-port"
+      - "8023"
+    ports:
+      - "8023:8023"
+    restart: unless-stopped
+    depends_on:
+      kafka1:
+        condition: service_healthy
+      kafka2:
+        condition: service_healthy
+      kafka3:
+        condition: service_healthy
+
   mid-agent:
     build:
-      context: ./ts-agents
+      context: ./agent
       dockerfile: Dockerfile
     container_name: mid-agent
     hostname: mid-agent
     networks: [backend]
     environment:
-      NODE_ENV: production
-      GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
-      GOOGLE_API_KEY: "${GEMINI_API_KEY:-}"
-      OTEL_SERVICE_NAME: mid-agent
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
-      KAFKA_BOOTSTRAP: kafka1:19092,kafka2:19092,kafka3:19092
-      KAFKA_GROUP_ID: mid-agent-ts-v1
-      INPUT_TOPIC: attention_ticket
-      OUTPUT_TOPIC: annotations
+      PYTHONUNBUFFERED: "1"
       DB_HOST: postgres
       DB_PORT: "5432"
       DB_NAME: bluesky
       DB_USER: bluesky
       DB_PASSWORD: bluesky
-      MID_AGENT_MODEL: gemini-2.5-flash-lite
-    command:
-      - "node"
-      - "dist/mid-agent/index.js"
-    ports:
-      - "8032:8032"
+      KAFKA_BOOTSTRAP: "kafka1:19092,kafka2:19092,kafka3:19092"
+      GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
+    volumes:
+      - ${CLAUDE_AUTH_DIR}:/home/agent/.claude
+      - ./skills:/app/skills:ro
+      - ./agent/CLAUDE.md:/app/CLAUDE.md:ro
     restart: unless-stopped
     depends_on:
       kafka1:
         condition: service_healthy
-      kafka2:
+      postgres:
         condition: service_healthy
-      kafka3:
-        condition: service_healthy
-      otel-collector:
-        condition: service_started
 
   strong-agent:
     build:
-      context: ./ts-agents
+      context: ./agent
       dockerfile: Dockerfile
     container_name: strong-agent
     hostname: strong-agent
     networks: [backend]
     environment:
-      NODE_ENV: production
-      GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
-      GOOGLE_API_KEY: "${GEMINI_API_KEY:-}"
-      OTEL_SERVICE_NAME: strong-agent
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
-      KAFKA_BOOTSTRAP: kafka1:19092,kafka2:19092,kafka3:19092
-      KAFKA_GROUP_ID: strong-agent-ts-v1
-      INPUT_TOPIC: annotations
-      OUTPUT_TOPIC: decision_packet
+      PYTHONUNBUFFERED: "1"
       DB_HOST: postgres
       DB_PORT: "5432"
       DB_NAME: bluesky
       DB_USER: bluesky
       DB_PASSWORD: bluesky
-      STRONG_AGENT_MODEL: gemini-2.5-flash-lite
-    command:
-      - "node"
-      - "dist/strong-agent/index.js"
-    ports:
-      - "8033:8033"
+      KAFKA_BOOTSTRAP: "kafka1:19092,kafka2:19092,kafka3:19092"
+      GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
+      WATCHLIST: "${WATCHLIST:-NVDA,SNDK,SPY,QQQ}"
+    volumes:
+      - ${CLAUDE_AUTH_DIR}:/home/agent/.claude
+      - ./skills:/app/skills:ro
+      - ./agent/CLAUDE.md:/app/CLAUDE.md:ro
     restart: unless-stopped
     depends_on:
       kafka1:
         condition: service_healthy
-      kafka2:
+      postgres:
         condition: service_healthy
-      kafka3:
-        condition: service_healthy
-      otel-collector:
-        condition: service_started
 
   backend-fastapi:
     build:
@@ -632,15 +718,13 @@ services:
       - ./observability/prometheus-rules.pipeline.yml:/etc/prometheus/rules/pipeline.yml:ro
     depends_on:
       - kafka-exporter
-      - bluesky-ingestor
       - local-ml-filter
       - embed-worker
       - fast-agent
-      - mid-agent
-      - strong-agent
       - backend-fastapi
       - sink-consumer
       - postgres-exporter
+      - twitter-ingestor
       - otel-collector
 
   grafana:

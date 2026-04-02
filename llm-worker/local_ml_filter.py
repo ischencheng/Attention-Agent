@@ -72,9 +72,9 @@ def derive_message_key(payload: dict[str, Any], incoming_key: bytes | str | None
         if isinstance(incoming_key, bytes):
             return incoming_key.decode("utf-8", errors="replace")
         return str(incoming_key)
-    cid = payload.get("cid")
-    if isinstance(cid, str) and cid:
-        return cid
+    source_id = payload.get("source_id")
+    if isinstance(source_id, str) and source_id:
+        return source_id
     return "unknown"
 
 
@@ -89,16 +89,16 @@ def get_relevance_score(payload: dict[str, Any]) -> float:
 
 
 def build_message_text(payload: dict[str, Any]) -> str:
-    raw = payload.get("raw")
-    if isinstance(raw, dict):
-        commit = raw.get("commit")
-        if isinstance(commit, dict):
-            record = commit.get("record")
-            if isinstance(record, dict):
-                record_text = record.get("text")
-                if isinstance(record_text, str) and record_text.strip():
-                    return record_text.strip()
-    return json.dumps(payload, ensure_ascii=False)[:2000]
+    """Extract text from unified envelope format."""
+    data = payload.get("data") or {}
+    ct = payload.get("content_type", "")
+    if ct == "social_post":
+        return (data.get("text") or "").strip()
+    if ct == "news_article":
+        return f"{data.get('title', '')} {data.get('snippet', '')}".strip()
+    if ct == "price_tick":
+        return ""  # price ticks should be auto-forwarded, not LLM-filtered
+    return json.dumps(data, ensure_ascii=False)[:2000]
 
 
 def parse_yes_no(text: str) -> bool | None:
@@ -117,10 +117,15 @@ def get_gemini_yes_no(payload: dict[str, Any], model: str, api_key: str, timeout
     if not api_key:
         return None
     message_text = build_message_text(payload)
+    source = payload.get("source", "unknown")
     prompt = (
-        "Please use common sense to judge whether this message is worth attention.\n"
+        "You are a pre-filter for an investment research pipeline.\n"
+        "Determine if this message MIGHT contain information relevant to "
+        "financial markets, investing, company performance, economic indicators, "
+        "or market sentiment.\n"
+        "Be INCLUSIVE - when in doubt, say YES. This is a broad net.\n"
         "Reply with only YES or NO.\n"
-        f"Message:\n{message_text}"
+        f"[{source}] {message_text}"
     )
     # region agent log
     debug_log(
@@ -132,18 +137,45 @@ def get_gemini_yes_no(payload: dict[str, Any], model: str, api_key: str, timeout
     )
     # endregion
     endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-    response = requests.post(
-        endpoint,
-        headers={"Content-Type": "application/json", "x-goog-api-key": api_key},
-        json={
-            "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {
-                "temperature": 0.0,
-            },
+    request_body = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {
+            "temperature": 0.0,
         },
-        timeout=max(2.0, timeout_seconds),
-    )
-    response.raise_for_status()
+    }
+    request_headers = {"Content-Type": "application/json", "x-goog-api-key": api_key}
+    effective_timeout = max(5.0, timeout_seconds)
+
+    # Retry once on timeout
+    last_exc: Exception | None = None
+    for attempt in range(2):
+        try:
+            response = requests.post(
+                endpoint,
+                headers=request_headers,
+                json=request_body,
+                timeout=effective_timeout,
+            )
+            response.raise_for_status()
+            break
+        except requests.exceptions.Timeout as exc:
+            last_exc = exc
+            if attempt == 0:
+                LOGGER.info("gemini timeout on attempt 1, retrying with longer timeout...")
+                effective_timeout = effective_timeout * 2
+                continue
+            raise
+        except requests.exceptions.HTTPError as exc:
+            # Retry on 503 Service Unavailable or 429 Rate Limit
+            if attempt == 0 and hasattr(exc, 'response') and exc.response is not None and exc.response.status_code in (429, 503):
+                LOGGER.info("gemini %d on attempt 1, retrying...", exc.response.status_code)
+                time.sleep(2)
+                continue
+            raise
+    else:
+        if last_exc:
+            raise last_exc
+
     data = response.json()
     candidates = data.get("candidates") if isinstance(data, dict) else []
     if not isinstance(candidates, list) or not candidates:
@@ -241,7 +273,6 @@ def main() -> None:
         }
     )
     producer = Producer({"bootstrap.servers": args.bootstrap})
-    consumer.subscribe([args.input_topic])
     running = True
 
     def handle_signal(*_: Any) -> None:
@@ -250,6 +281,48 @@ def main() -> None:
 
     signal.signal(signal.SIGINT, handle_signal)
     signal.signal(signal.SIGTERM, handle_signal)
+
+    # Wait for input topic to exist (handles startup race with Flink)
+    MAX_TOPIC_WAIT = 120  # seconds
+    topic_ready = False
+    wait_start = time.monotonic()
+    while running and not topic_ready:
+        try:
+            consumer.subscribe([args.input_topic])
+            # Do a short poll to check for UNKNOWN_TOPIC errors
+            test_msg = consumer.poll(2.0)
+            if test_msg is not None and test_msg.error():
+                err = test_msg.error()
+                if err.code() in (KafkaException(err).args[0].code() if False else -1,):
+                    pass  # won't reach
+                code_name = err.name()
+                if "UNKNOWN_TOPIC" in code_name:
+                    elapsed = time.monotonic() - wait_start
+                    if elapsed > MAX_TOPIC_WAIT:
+                        LOGGER.error("topic %s not available after %ds, giving up", args.input_topic, MAX_TOPIC_WAIT)
+                        raise KafkaException(err)
+                    LOGGER.info("waiting for topic %s ... (%.0fs)", args.input_topic, elapsed)
+                    consumer.unsubscribe()
+                    time.sleep(5)
+                    continue
+                else:
+                    raise KafkaException(err)
+            topic_ready = True
+        except KafkaException as exc:
+            err_str = str(exc)
+            if "UNKNOWN_TOPIC" in err_str:
+                elapsed = time.monotonic() - wait_start
+                if elapsed > MAX_TOPIC_WAIT:
+                    raise
+                LOGGER.info("waiting for topic %s ... (%.0fs)", args.input_topic, elapsed)
+                try:
+                    consumer.unsubscribe()
+                except Exception:
+                    pass
+                time.sleep(5)
+            else:
+                raise
+
     LOGGER.info(
         "local-ml-filter started input=%s output=%s threshold=%.2f llm_window_s=%.1f llm_batch_max=%s",
         args.input_topic,
@@ -266,7 +339,12 @@ def main() -> None:
             msg = consumer.poll(args.poll_timeout_seconds)
             if msg is not None:
                 if msg.error():
-                    raise KafkaException(msg.error())
+                    err = msg.error()
+                    if "UNKNOWN_TOPIC" in err.name():
+                        LOGGER.warning("topic temporarily unavailable, retrying...")
+                        time.sleep(2)
+                        continue
+                    raise KafkaException(err)
 
                 payload = decode_payload(msg.value())
                 if payload is None:

@@ -5,35 +5,23 @@ CREATE TABLE IF NOT EXISTS raw_messages (
     kafka_topic TEXT NOT NULL,
     kafka_partition INTEGER NOT NULL,
     kafka_offset BIGINT NOT NULL,
-    cid TEXT,
     payload JSONB NOT NULL,
     raw JSONB,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT raw_messages_kafka_offset_uniq UNIQUE (kafka_topic, kafka_partition, kafka_offset)
 );
+CREATE INDEX IF NOT EXISTS idx_raw_messages_source ON raw_messages ((payload->>'source'));
+CREATE INDEX IF NOT EXISTS idx_raw_messages_source_id ON raw_messages ((payload->>'source_id'));
 
 CREATE TABLE IF NOT EXISTS source_clean (
     id BIGSERIAL PRIMARY KEY,
     kafka_topic TEXT NOT NULL,
     kafka_partition INTEGER NOT NULL,
     kafka_offset BIGINT NOT NULL,
-    cid TEXT,
     payload JSONB NOT NULL,
     raw JSONB,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT source_clean_kafka_offset_uniq UNIQUE (kafka_topic, kafka_partition, kafka_offset)
-);
-
-CREATE TABLE IF NOT EXISTS embedding_requests (
-    id BIGSERIAL PRIMARY KEY,
-    kafka_topic TEXT NOT NULL,
-    kafka_partition INTEGER NOT NULL,
-    kafka_offset BIGINT NOT NULL,
-    cid TEXT,
-    payload JSONB NOT NULL,
-    raw JSONB,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    CONSTRAINT embedding_requests_kafka_offset_uniq UNIQUE (kafka_topic, kafka_partition, kafka_offset)
 );
 
 CREATE TABLE IF NOT EXISTS vector_embeddings (
@@ -41,7 +29,6 @@ CREATE TABLE IF NOT EXISTS vector_embeddings (
     kafka_topic TEXT NOT NULL,
     kafka_partition INTEGER NOT NULL,
     kafka_offset BIGINT NOT NULL,
-    cid TEXT,
     payload JSONB NOT NULL,
     embedding_vec vector(768),
     raw JSONB,
@@ -57,7 +44,6 @@ CREATE TABLE IF NOT EXISTS attention_tickets (
     kafka_topic TEXT NOT NULL,
     kafka_partition INTEGER NOT NULL,
     kafka_offset BIGINT NOT NULL,
-    cid TEXT,
     payload JSONB NOT NULL,
     raw JSONB,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -69,7 +55,6 @@ CREATE TABLE IF NOT EXISTS annotations (
     kafka_topic TEXT NOT NULL,
     kafka_partition INTEGER NOT NULL,
     kafka_offset BIGINT NOT NULL,
-    cid TEXT,
     payload JSONB NOT NULL,
     raw JSONB,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -81,9 +66,14 @@ CREATE TABLE IF NOT EXISTS decision_packets (
     kafka_topic TEXT NOT NULL,
     kafka_partition INTEGER NOT NULL,
     kafka_offset BIGINT NOT NULL,
-    cid TEXT,
     payload JSONB NOT NULL,
     raw JSONB,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT decision_packets_kafka_offset_uniq UNIQUE (kafka_topic, kafka_partition, kafka_offset)
+);
+
+CREATE TABLE IF NOT EXISTS agent_state (
+    agent_id TEXT PRIMARY KEY,
+    state JSONB NOT NULL DEFAULT '{}',
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

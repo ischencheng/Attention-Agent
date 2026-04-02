@@ -46,17 +46,10 @@ def decode_payload(raw: bytes | None) -> dict[str, Any] | None:
     return payload if isinstance(payload, dict) else None
 
 
-def extract_cid(payload: dict[str, Any]) -> str | None:
-    cid = payload.get("cid")
-    if isinstance(cid, str) and cid:
-        return cid
-    raw = payload.get("raw")
-    if isinstance(raw, dict):
-        commit = raw.get("commit")
-        if isinstance(commit, dict):
-            commit_cid = commit.get("cid")
-            if isinstance(commit_cid, str) and commit_cid:
-                return commit_cid
+def extract_source_id(payload: dict[str, Any]) -> str | None:
+    source_id = payload.get("source_id")
+    if isinstance(source_id, str) and source_id:
+        return source_id
     return None
 
 
@@ -83,17 +76,28 @@ def get_gemini_embedding(
     if not api_key:
         return None
     endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:embedContent"
-    response = requests.post(
-        endpoint,
-        headers={"Content-Type": "application/json", "x-goog-api-key": api_key},
-        json={
-            "model": f"models/{model}",
-            "content": {"parts": [{"text": text[:8000]}]},
-            "outputDimensionality": max(128, min(3072, int(output_dim))),
-        },
-        timeout=max(2.0, timeout_seconds),
-    )
-    response.raise_for_status()
+    max_retries = 3
+    backoff = 2.0
+    for attempt in range(1, max_retries + 1):
+        response = requests.post(
+            endpoint,
+            headers={"Content-Type": "application/json", "x-goog-api-key": api_key},
+            json={
+                "model": f"models/{model}",
+                "content": {"parts": [{"text": text[:8000]}]},
+                "outputDimensionality": max(128, min(3072, int(output_dim))),
+            },
+            timeout=max(2.0, timeout_seconds),
+        )
+        if response.status_code == 429:
+            if attempt < max_retries:
+                LOGGER.warning("gemini embedding 429, retry %d/%d backoff=%.1fs", attempt, max_retries, backoff)
+                time.sleep(backoff)
+                backoff = min(backoff * 2, 30.0)
+                continue
+            LOGGER.warning("gemini embedding 429 after %d retries, using local fallback", max_retries)
+            return None
+        response.raise_for_status()
     payload = response.json()
     embedding = payload.get("embedding") if isinstance(payload, dict) else {}
     values = embedding.get("values") if isinstance(embedding, dict) else None
@@ -103,16 +107,17 @@ def get_gemini_embedding(
 
 
 def extract_text(payload: dict[str, Any]) -> str:
-    raw = payload.get("raw")
-    if isinstance(raw, dict):
-        commit = raw.get("commit")
-        if isinstance(commit, dict):
-            record = commit.get("record")
-            if isinstance(record, dict):
-                text = record.get("text")
-                if isinstance(text, str):
-                    return text
-    return ""
+    """Extract text from unified envelope format."""
+    data = payload.get("data") or {}
+    ct = payload.get("content_type", "")
+    if ct == "social_post":
+        return (data.get("text") or "").strip()
+    if ct == "news_article":
+        return f"{data.get('title', '')} {data.get('snippet', '')}".strip()
+    if ct == "price_tick":
+        ticker = data.get("ticker", "")
+        return f"{ticker} price:{data.get('price', '')} change:{data.get('change_pct', '')}%"
+    return json.dumps(data, ensure_ascii=False)[:2000]
 
 
 def commit_with_retry(consumer: Consumer, msg: Any, attempts: int = 3, backoff_seconds: float = 0.5) -> bool:
@@ -185,8 +190,8 @@ def main() -> None:
                 EMBED_TOTAL.labels("invalid_payload").inc()
                 commit_with_retry(consumer, msg)
                 continue
-            cid = extract_cid(payload)
-            if not cid:
+            source_id = extract_source_id(payload)
+            if not source_id:
                 EMBED_TOTAL.labels("invalid_payload").inc()
                 commit_with_retry(consumer, msg)
                 continue
@@ -205,14 +210,11 @@ def main() -> None:
                 else:
                     embedding = local_fallback_embedding(text)
 
-                output = {
-                    "cid": cid,
-                    "raw": payload,
-                    "embedding": embedding,
-                }
+                output = dict(payload)
+                output["embedding"] = embedding
                 producer.produce(
                     topic=args.output_topic,
-                    key=cid.encode("utf-8"),
+                    key=source_id.encode("utf-8"),
                     value=json.dumps(output, ensure_ascii=False).encode("utf-8"),
                     headers=msg.headers(),
                 )

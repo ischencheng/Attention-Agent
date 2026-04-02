@@ -91,33 +91,6 @@ def parse_topics(topics_csv: str) -> list[str]:
     return topics
 
 
-def extract_cid(msg: Message, payload: dict[str, Any]) -> str | None:
-    cid = payload.get("cid")
-    if isinstance(cid, str) and cid:
-        return cid
-
-    commit = payload.get("commit")
-    if isinstance(commit, dict):
-        commit_cid = commit.get("cid")
-        if isinstance(commit_cid, str) and commit_cid:
-            return commit_cid
-
-    raw = payload.get("raw")
-    if isinstance(raw, dict):
-        raw_commit = raw.get("commit")
-        if isinstance(raw_commit, dict):
-            raw_commit_cid = raw_commit.get("cid")
-            if isinstance(raw_commit_cid, str) and raw_commit_cid:
-                return raw_commit_cid
-
-    key = msg.key()
-    if isinstance(key, bytes):
-        return key.decode("utf-8", errors="replace")
-    if isinstance(key, str):
-        return key
-    return None
-
-
 def decode_json_payload(msg: Message) -> dict[str, Any] | None:
     raw_value = msg.value()
     if raw_value is None:
@@ -155,7 +128,6 @@ def extract_embedding_literal(payload: dict[str, Any]) -> str | None:
 TOPIC_TABLE_MAP: dict[str, str] = {
     "source_raw": "raw_messages",
     "source_clean": "source_clean",
-    "embedding_requests": "embedding_requests",
     "vector_embedding": "vector_embeddings",
     "attention_ticket": "attention_tickets",
     "annotations": "annotations",
@@ -163,38 +135,34 @@ TOPIC_TABLE_MAP: dict[str, str] = {
 }
 
 def insert_topic_payload(cursor: Any, table_name: str, msg: Message, payload: dict[str, Any]) -> None:
-    cid = extract_cid(msg, payload)
     cursor.execute(
         f"""
-        INSERT INTO {table_name} (kafka_topic, kafka_partition, kafka_offset, cid, payload, raw)
-        VALUES (%s, %s, %s, %s, %s, %s)
+        INSERT INTO {table_name} (kafka_topic, kafka_partition, kafka_offset, payload, raw)
+        VALUES (%s, %s, %s, %s, %s)
         ON CONFLICT (kafka_topic, kafka_partition, kafka_offset) DO NOTHING
         """,
         (
             msg.topic(),
             msg.partition(),
             msg.offset(),
-            cid,
             Json(payload),
             Json(extract_raw(payload)),
         ),
     )
 
 def insert_vector_embedding_payload(cursor: Any, msg: Message, payload: dict[str, Any]) -> None:
-    cid = extract_cid(msg, payload)
     embedding_literal = extract_embedding_literal(payload)
     if embedding_literal is None:
         cursor.execute(
             """
-            INSERT INTO vector_embeddings (kafka_topic, kafka_partition, kafka_offset, cid, payload, raw)
-            VALUES (%s, %s, %s, %s, %s, %s)
+            INSERT INTO vector_embeddings (kafka_topic, kafka_partition, kafka_offset, payload, raw)
+            VALUES (%s, %s, %s, %s, %s)
             ON CONFLICT (kafka_topic, kafka_partition, kafka_offset) DO NOTHING
             """,
             (
                 msg.topic(),
                 msg.partition(),
                 msg.offset(),
-                cid,
                 Json(payload),
                 Json(extract_raw(payload)),
             ),
@@ -203,15 +171,14 @@ def insert_vector_embedding_payload(cursor: Any, msg: Message, payload: dict[str
 
     cursor.execute(
         """
-        INSERT INTO vector_embeddings (kafka_topic, kafka_partition, kafka_offset, cid, payload, embedding_vec, raw)
-        VALUES (%s, %s, %s, %s, %s, %s::vector, %s)
+        INSERT INTO vector_embeddings (kafka_topic, kafka_partition, kafka_offset, payload, embedding_vec, raw)
+        VALUES (%s, %s, %s, %s, %s::vector, %s)
         ON CONFLICT (kafka_topic, kafka_partition, kafka_offset) DO NOTHING
         """,
         (
             msg.topic(),
             msg.partition(),
             msg.offset(),
-            cid,
             Json(payload),
             embedding_literal,
             Json(extract_raw(payload)),
@@ -320,9 +287,18 @@ def run() -> None:
         args.metrics_port,
     )
     unknown_topic_code = getattr(KafkaError, "UNKNOWN_TOPIC_OR_PART", 3)
+    last_resubscribe = time.monotonic()
+    RESUBSCRIBE_INTERVAL = 30.0  # re-subscribe every 30s to pick up late-created topics
 
     try:
         while running:
+            # Periodically re-subscribe so the consumer discovers topics
+            # that were created after the initial subscribe() call.
+            now = time.monotonic()
+            if now - last_resubscribe >= RESUBSCRIBE_INTERVAL:
+                consumer.subscribe(topics)
+                last_resubscribe = now
+
             msg = consumer.poll(args.poll_timeout_seconds)
             if msg is None:
                 continue
@@ -334,6 +310,9 @@ def run() -> None:
                 # Topics may not exist until upstream services start and create them.
                 if code == unknown_topic_code:
                     LOGGER.warning("topic not ready yet: %s", error)
+                    # Force a re-subscribe to pick up newly created topics
+                    consumer.subscribe(topics)
+                    last_resubscribe = time.monotonic()
                     time.sleep(2.0)
                     continue
                 raise KafkaException(error)

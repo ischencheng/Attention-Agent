@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import logging
 import signal
 import threading
@@ -259,6 +260,46 @@ class BlueskyIngestor:
                     max(1.0, self.args.reconnect_max_backoff_seconds),
                 )
 
+    @staticmethod
+    def transform_to_unified(raw_bytes: bytes) -> bytes | None:
+        """Transform raw Bluesky Jetstream event into unified envelope format."""
+        try:
+            event = json.loads(raw_bytes)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return None
+        if not isinstance(event, dict):
+            return None
+
+        commit = event.get("commit")
+        if not isinstance(commit, dict):
+            return None
+        if commit.get("collection") != "app.bsky.feed.post":
+            return None
+        if commit.get("operation") != "create":
+            return None
+
+        record = commit.get("record", {})
+        text = record.get("text", "")
+        if not text:
+            return None
+
+        cid = commit.get("cid", "")
+        langs = record.get("langs", [])
+
+        envelope = {
+            "source": "bluesky",
+            "source_id": cid,
+            "content_type": "social_post",
+            "timestamp": record.get("createdAt", ""),
+            "data": {
+                "text": text,
+                "author": event.get("did", ""),
+                "lang": langs[0] if langs else "",
+            },
+            "raw": event,
+        }
+        return json.dumps(envelope, ensure_ascii=False).encode("utf-8")
+
     async def consume_stream(self, ws: Any) -> None:
         async for message in ws:
             if not self.running:
@@ -267,10 +308,14 @@ class BlueskyIngestor:
             self.metrics.events_received.inc()
             self.metrics.last_event_unixtime.set(time.time())
 
-            payload = message if isinstance(message, bytes) else str(message).encode("utf-8")
+            raw_bytes = message if isinstance(message, bytes) else str(message).encode("utf-8")
+            unified = self.transform_to_unified(raw_bytes)
+            if unified is None:
+                continue  # skip non-post events
+
             ok, error = await self.produce_with_retry(
                 topic=self.topic,
-                payload=payload,
+                payload=unified,
                 max_retries=max(1, self.args.max_produce_retries),
                 backoff_seconds=max(0.1, self.args.produce_retry_backoff_seconds),
             )

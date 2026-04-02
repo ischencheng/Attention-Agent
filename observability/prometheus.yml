@@ -41,26 +41,12 @@ scrape_configs:
           env: local_lab
           component: local_ml_filter
 
-  - job_name: mid_agent
-    static_configs:
-      - targets: ["mid-agent:8032"]
-        labels:
-          env: local_lab
-          component: mid_agent
-
   - job_name: embed_worker
     static_configs:
       - targets: ["embed-worker:8034"]
         labels:
           env: local_lab
           component: embed_worker
-
-  - job_name: strong_agent
-    static_configs:
-      - targets: ["strong-agent:8033"]
-        labels:
-          env: local_lab
-          component: strong_agent
 
   - job_name: sink_consumer
     static_configs:
@@ -97,6 +83,27 @@ scrape_configs:
         labels:
           env: local_lab
           component: flink_taskmanager
+
+  - job_name: finnhub_ingestor
+    static_configs:
+      - targets: ["finnhub-ingestor:8021"]
+        labels:
+          env: local_lab
+          component: finnhub_ingestor
+
+  - job_name: polygon_news_ingestor
+    static_configs:
+      - targets: ["polygon-news-ingestor:8022"]
+        labels:
+          env: local_lab
+          component: polygon_news_ingestor
+
+  - job_name: twitter_ingestor
+    static_configs:
+      - targets: ["twitter-ingestor:8023"]
+        labels:
+          env: local_lab
+          component: twitter_ingestor
 
   - job_name: otel_collector
     static_configs:

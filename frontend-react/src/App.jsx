@@ -7,12 +7,9 @@ function buildApiUrl(path) {
 }
 
 function buildWsUrl() {
-  if (import.meta.env.VITE_WS_URL) {
-    return import.meta.env.VITE_WS_URL;
-  }
+  if (import.meta.env.VITE_WS_URL) return import.meta.env.VITE_WS_URL;
   const wsProtocol = window.location.protocol === "https:" ? "wss" : "ws";
-  const host = window.location.host;
-  return `${wsProtocol}://${host}/ws/signals`;
+  return `${wsProtocol}://${window.location.host}/ws/signals`;
 }
 
 function fmtTime(ts) {
@@ -21,131 +18,292 @@ function fmtTime(ts) {
   return Number.isNaN(date.getTime()) ? "-" : date.toLocaleString();
 }
 
+const SOURCE_COLORS = {
+  bluesky: "#3b82f6",
+  twitter: "#1d9bf0",
+  polygon: "#8b5cf6",
+  finnhub: "#22c55e",
+};
+
+const URGENCY_COLORS = {
+  critical: "#ef4444",
+  high: "#f97316",
+  medium: "#eab308",
+  low: "#22c55e",
+};
+
+function SourceBadge({ source }) {
+  const color = SOURCE_COLORS[source] || "#6b7280";
+  return <span className="badge" style={{ borderColor: color, color }}>{source}</span>;
+}
+
+function UrgencyBadge({ urgency }) {
+  if (!urgency) return null;
+  const color = URGENCY_COLORS[urgency] || "#6b7280";
+  return <span className="badge" style={{ borderColor: color, color }}>{urgency}</span>;
+}
+
+function ThemeTags({ themes }) {
+  if (!themes || !themes.length) return null;
+  return (
+    <div className="tags">
+      {themes.map((t) => <span key={t} className="tag">{t}</span>)}
+    </div>
+  );
+}
+
+function TicketDetail({ row }) {
+  const p = row.payload || {};
+  const data = p.data || {};
+  return (
+    <article className="feed-card ticket-card">
+      <div className="card-header">
+        <span className="card-type ticket-type">TICKET</span>
+        <SourceBadge source={p.source || "?"} />
+        <span className="muted">{fmtTime(p.timestamp || row.created_at)}</span>
+      </div>
+      <p>{data.text || "-"}</p>
+      <div className="card-footer">
+        <span className="muted">{data.author || ""}</span>
+        {p.content_type && <span className="muted">{p.content_type}</span>}
+      </div>
+    </article>
+  );
+}
+
+function ClusterBadge({ type }) {
+  if (!type) return null;
+  const colors = { convergence: "#3b82f6", divergence: "#f97316", anomaly: "#a855f7", escalation: "#ef4444" };
+  const color = colors[type] || "#6b7280";
+  return <span className="badge" style={{ borderColor: color, color }}>{type}</span>;
+}
+
+function AnnotationCard({ row }) {
+  const [expanded, setExpanded] = useState(false);
+  const [tickets, setTickets] = useState(null);
+  const p = row.payload || {};
+  const ticketIds = p.attention_ticket_ids || (p.attention_ticket_id ? [p.attention_ticket_id] : []);
+  const hasTickets = ticketIds.length > 0;
+  const facts = p.facts || [];
+  const openQuestions = p.open_questions || [];
+  const sectors = p.related_sectors || p.sectors || [];
+
+  async function handleToggle() {
+    const next = !expanded;
+    setExpanded(next);
+    if (next && tickets === null && hasTickets) {
+      try {
+        const res = await fetch(buildApiUrl(`/api/tickets/by-ids?ids=${ticketIds.join(",")}`));
+        const data = await res.json();
+        setTickets(data.items || []);
+      } catch { /* ignore */ }
+    }
+  }
+
+  return (
+    <article className="feed-card annotation-card">
+      <div className={`card-header ${hasTickets ? "card-toggle" : ""}`} onClick={hasTickets ? handleToggle : undefined}>
+        <span className="card-type annotation-type">ANNOTATION</span>
+        <ClusterBadge type={p.cluster_type} />
+        {p.signal_count && <span className="badge ticket-count">{p.signal_count} signals / {p.source_count || "?"} sources</span>}
+        {p.related_tickers && p.related_tickers.length > 0 && (
+          <span className="badge" style={{ borderColor: "#6b7280", color: "#6b7280" }}>{p.related_tickers.join(", ")}</span>
+        )}
+        <span className="muted">{fmtTime(row.created_at)}</span>
+        {hasTickets && <span className={`expand-indicator ${expanded ? "open" : ""}`}>&#9654;</span>}
+      </div>
+      <p>{p.summary || p.analysis || "-"}</p>
+      {facts.length > 0 && (
+        <ul className="facts-list">
+          {facts.map((f, i) => (
+            <li key={i} className="muted"><SourceBadge source={f.source || "?"} /> {f.fact}</li>
+          ))}
+        </ul>
+      )}
+      {openQuestions.length > 0 && (
+        <div className="open-questions">
+          <span className="muted">Open questions:</span>
+          <ul>{openQuestions.map((q, i) => <li key={i} className="muted">{q}</li>)}</ul>
+        </div>
+      )}
+      {sectors.length > 0 && (
+        <p className="muted">sectors: {sectors.join(", ")}</p>
+      )}
+      <div className="card-footer">
+        <span className="muted">agent: {p.agent_id || "?"}</span>
+      </div>
+      {expanded && (
+        <div className="drill-down">
+          {tickets === null
+            ? <p className="muted">Loading...</p>
+            : tickets.length === 0
+              ? <p className="muted">No tickets found</p>
+              : tickets.map((t) => <TicketDetail key={t.id} row={t} />)
+          }
+        </div>
+      )}
+    </article>
+  );
+}
+
+function DecisionCard({ row }) {
+  const [expanded, setExpanded] = useState(false);
+  const [relatedAnnotations, setRelatedAnnotations] = useState(null);
+  const p = row.payload || {};
+  const actions = p.actions || [];
+  const annotationIds = p.related_annotations || [];
+
+  async function handleToggle() {
+    const next = !expanded;
+    setExpanded(next);
+    if (next && relatedAnnotations === null && annotationIds.length > 0) {
+      try {
+        const res = await fetch(buildApiUrl(`/api/annotations/by-ids?ids=${annotationIds.join(",")}`));
+        const data = await res.json();
+        setRelatedAnnotations(data.items || []);
+      } catch { /* ignore */ }
+    }
+  }
+
+  return (
+    <article className="feed-card decision-card">
+      <div className={`card-header ${annotationIds.length > 0 ? "card-toggle" : ""}`} onClick={annotationIds.length > 0 ? handleToggle : undefined}>
+        <span className="card-type decision-type">DECISION</span>
+        <UrgencyBadge urgency={p.priority} />
+        <span className="muted">{fmtTime(row.created_at)}</span>
+        {annotationIds.length > 0 && <span className={`expand-indicator ${expanded ? "open" : ""}`}>&#9654;</span>}
+      </div>
+      <h3>{p.title || p.decision_type || "Decision Packet"}</h3>
+      <p>{p.summary || "-"}</p>
+      {p.confidence != null && (
+        <p className="muted">confidence: {(p.confidence * 100).toFixed(0)}%</p>
+      )}
+      {actions.length > 0 && (
+        <div className="actions-list">
+          {actions.map((a, i) => (
+            <div key={i} className="action-item">
+              <span className={`action-badge action-${a.action}`}>{a.action}</span>
+              <span>{a.sector}</span>
+              {a.tickers && <span className="tickers">{a.tickers.join(", ")}</span>}
+              {a.rationale && <span className="muted"> — {a.rationale}</span>}
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="card-footer">
+        <span className="muted">agent: {p.agent_id || "?"}</span>
+      </div>
+      {expanded && (
+        <div className="drill-down">
+          {relatedAnnotations === null
+            ? <p className="muted">Loading...</p>
+            : relatedAnnotations.length === 0
+              ? <p className="muted">No related annotations found</p>
+              : relatedAnnotations.map((a) => <AnnotationCard key={a.id} row={a} />)
+          }
+        </div>
+      )}
+    </article>
+  );
+}
+
+function FeedItem({ item }) {
+  switch (item.item_type) {
+    case "decision_packet": return <DecisionCard row={item} />;
+    case "annotation": return <AnnotationCard row={item} />;
+    default: return null;
+  }
+}
+
 export default function App() {
-  const [chains, setChains] = useState([]);
-  const [overview, setOverview] = useState({ candidate_count: 0, final_count: 0 });
+  const [feed, setFeed] = useState([]);
+  const [overview, setOverview] = useState({});
   const [wsState, setWsState] = useState("connecting");
   const wsUrl = useMemo(() => buildWsUrl(), []);
 
-  async function loadInitial() {
-    const [chainsRes, overviewRes] = await Promise.all([
-      fetch(buildApiUrl("/api/decision-chains?limit=20")),
-      fetch(buildApiUrl("/api/overview")),
-    ]);
-    const chainsData = await chainsRes.json();
-    const overviewData = await overviewRes.json();
-    setChains(Array.isArray(chainsData.items) ? chainsData.items : []);
-    setOverview(overviewData || {});
+  async function loadData() {
+    try {
+      const [feedRes, overviewRes] = await Promise.all([
+        fetch(buildApiUrl("/api/feed?limit=50")),
+        fetch(buildApiUrl("/api/overview")),
+      ]);
+      const feedData = await feedRes.json();
+      const overviewData = await overviewRes.json();
+      setFeed(Array.isArray(feedData.items) ? feedData.items : []);
+      setOverview(overviewData || {});
+    } catch { /* ignore */ }
   }
 
+  useEffect(() => { loadData(); }, []);
+
+  // Fallback polling: refresh data every 15s regardless of WebSocket state
   useEffect(() => {
-    loadInitial().catch(() => undefined);
+    const timer = setInterval(loadData, 15000);
+    return () => clearInterval(timer);
   }, []);
 
   useEffect(() => {
-    const ws = new WebSocket(wsUrl);
-    ws.onopen = () => {
-      setWsState("connected");
-      ws.send("subscribe");
-    };
-    ws.onclose = () => {
-      setWsState("disconnected");
-    };
-    ws.onerror = () => {
-      setWsState("error");
-    };
-    ws.onmessage = (event) => {
-      try {
-        const message = JSON.parse(event.data);
-        if (message.event !== "strategy_signal_final" || !message.data) return;
-        loadInitial().catch(() => undefined);
-        setOverview((prev) => ({ ...prev, final_count: (prev.final_count || 0) + 1 }));
-      } catch {
-        // ignore malformed messages
-      }
-    };
-    return () => ws.close();
+    let reconnectTimer;
+    function connect() {
+      const ws = new WebSocket(wsUrl);
+      ws.onopen = () => { setWsState("connected"); ws.send("subscribe"); };
+      ws.onclose = () => { setWsState("disconnected"); reconnectTimer = setTimeout(connect, 3000); };
+      ws.onerror = () => { setWsState("error"); };
+      ws.onmessage = () => { loadData(); };
+      return ws;
+    }
+    const ws = connect();
+    return () => { clearTimeout(reconnectTimer); ws.close(); };
   }, [wsUrl]);
+
+  const sources = overview.sources || {};
+  const sourceEntries = Object.entries(sources);
 
   return (
     <main className="container">
       <header className="header">
-        <h1>Bluesky Strategy Dashboard</h1>
-        <p>FastAPI + LLM worker + WebSocket realtime loop</p>
+        <h1>AI Attention Proxy</h1>
+        <p>Multi-source intelligence pipeline</p>
       </header>
 
       <section className="cards">
         <article className="card">
-          <h3>WebSocket</h3>
+          <h3>Live Feed</h3>
           <p className={`status status-${wsState}`}>{wsState}</p>
         </article>
         <article className="card">
-          <h3>Candidates</h3>
-          <p>{overview.candidate_count || 0}</p>
+          <h3>Sources</h3>
+          {sourceEntries.length > 0
+            ? sourceEntries.map(([src, cnt]) => (
+                <p key={src} style={{ margin: "2px 0" }}>
+                  <SourceBadge source={src} /> {cnt.toLocaleString()}
+                </p>
+              ))
+            : <p className="muted">-</p>
+          }
         </article>
         <article className="card">
-          <h3>Final Signals</h3>
-          <p>{overview.final_count || 0}</p>
+          <h3>Pipeline</h3>
+          <p style={{ margin: "2px 0" }}>
+            <span className="muted">tickets</span> {(overview.ticket_count || 0).toLocaleString()}
+          </p>
+          <p style={{ margin: "2px 0" }}>
+            <span className="muted">annotations</span> {(overview.annotation_count || 0).toLocaleString()}
+          </p>
+          <p style={{ margin: "2px 0" }}>
+            <span className="muted">decisions</span> {(overview.decision_count || 0).toLocaleString()}
+          </p>
         </article>
       </section>
 
-      <section className="grid">
-        <article className="panel">
-          <h2>Decision Workbench (Phase 4)</h2>
-          <ul className="chains">
-            {chains.map((item) => {
-              const decision = item.decision || {};
-              const annotations = Array.isArray(item.annotations) ? item.annotations : [];
-              return (
-                <li key={decision.id || decision.cid}>
-                  <div className="chain-head">
-                    <strong>{decision.cid || "unknown cid"}</strong>
-                    <span>{fmtTime(decision.created_at)}</span>
-                  </div>
-                  <p>
-                    <strong>report</strong>
-                  </p>
-                  <p>{decision.report || "-"}</p>
-
-                  <div className="chain-subsection">
-                    <h4>Annotations</h4>
-                    {annotations.length === 0 && <p className="muted">No linked annotations</p>}
-                    {annotations.map((annotation) => {
-                      const raws = Array.isArray(annotation.raw_messages) ? annotation.raw_messages : [];
-                      return (
-                        <div className="annotation" key={annotation.cid || "annotation"}>
-                          <p>
-                            <strong>cid</strong>: {annotation.cid || "-"}
-                          </p>
-                          <p className="muted">
-                            mid_agent_relevant_cids=
-                            {Array.isArray(annotation.mid_agent_relevant_cids)
-                              ? annotation.mid_agent_relevant_cids.join(", ")
-                              : "-"}
-                          </p>
-                          <p className="muted">related raw={raws.length}</p>
-                          {raws.map((raw) => (
-                            <div className="raw" key={raw.cid || "raw"}>
-                              <p>
-                                <strong>{raw.cid || "unknown-cid"}</strong> · {fmtTime(raw.created_at)}
-                              </p>
-                              <p>{raw.text || "-"}</p>
-                            </div>
-                          ))}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </li>
-              );
-            })}
-            {chains.length === 0 && (
-              <li>
-                <p className="muted">No decision chains yet.</p>
-              </li>
-            )}
-          </ul>
-        </article>
+      <section className="feed-section">
+        <h2>Activity Feed</h2>
+        <div className="feed-list">
+          {feed.map((item) => (
+            <FeedItem key={`${item.item_type}-${item.id}`} item={item} />
+          ))}
+          {feed.length === 0 && <p className="muted">No activity yet. Pipeline is running...</p>}
+        </div>
       </section>
     </main>
   );

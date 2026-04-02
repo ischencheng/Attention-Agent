@@ -59,28 +59,37 @@ def loads_maybe_json(value: Any) -> Optional[Dict[str, Any]]:
 
 
 def process_raw(payload: Dict[str, Any], keywords: set[str]) -> Optional[Dict[str, Any]]:
-    commit = payload.get("commit")
-    if not isinstance(commit, dict):
-        return None
-    if commit.get("collection") != "app.bsky.feed.post":
-        return None
-
-    cid = commit.get("cid")
-    if not isinstance(cid, str) or not cid:
+    """Process unified envelope from source_raw. Returns envelope unchanged if it passes filter."""
+    content_type = payload.get("content_type")
+    source_id = payload.get("source_id")
+    if not source_id or not content_type:
         return None
 
-    record = commit.get("record")
-    if not isinstance(record, dict):
-        return None
-    text = record.get("text")
-    if not isinstance(text, str):
+    # Price ticks always pass through (pre-filtered by ticker subscription)
+    if content_type == "price_tick":
+        return payload
+
+    # Twitter source passes through without keyword filter (pre-filtered by following list)
+    source = payload.get("source", "")
+    if source == "twitter":
+        return payload
+
+    # For other social_post and news_article, apply keyword filter
+    data = payload.get("data") or {}
+    text_parts = [
+        data.get("text") or "",
+        data.get("title") or "",
+        data.get("snippet") or "",
+    ]
+    text = " ".join(text_parts).strip()
+    if not text:
         return None
 
     haystack = text.lower()
     for kw in keywords:
         token = kw.strip().lower()
         if token and token in haystack:
-            return {"cid": cid, "raw": payload}
+            return payload  # pass unified envelope through unchanged
     return None
 
 
@@ -145,22 +154,16 @@ def run_flink_job(args: argparse.Namespace) -> None:
 def run_single_file_test() -> None:
     raw_str = r'''
     {
-      "did": "did:plc:trwim3dlnep55nelnthy3r5g",
-      "kind": "commit",
-      "commit": {
-        "cid": "bafyreigsrkuihkw3evywnsj3y7z3drf56wa6ed4ki7dsz7h3ybhvqq5giy",
-        "rev": "3mhlq4rsfjv22",
-        "rkey": "3mhlq4roxrs2y",
-        "record": {
-          "$type": "app.bsky.feed.post",
-          "text": "AI picture pipeline update with better GPU utilization.",
-          "langs": ["en"],
-          "createdAt": "2026-03-21T19:08:05.388Z"
-        },
-        "operation": "create",
-        "collection": "app.bsky.feed.post"
+      "source": "bluesky",
+      "source_id": "bafyreigsrkuihkw3evywnsj3y7z3drf56wa6ed4ki7dsz7h3ybhvqq5giy",
+      "content_type": "social_post",
+      "timestamp": "2026-03-21T19:08:05.388Z",
+      "data": {
+        "text": "AI picture pipeline update with better GPU utilization.",
+        "author": "did:plc:trwim3dlnep55nelnthy3r5g",
+        "lang": "en"
       },
-      "time_us": 1774120086929886
+      "raw": {}
     }
     '''
     payload = loads_maybe_json(raw_str)

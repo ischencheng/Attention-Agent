@@ -1,0 +1,4 @@
+confluent-kafka
+prometheus-client
+websockets
+requests

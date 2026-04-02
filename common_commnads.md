@@ -166,7 +166,6 @@ cd d:\project\ABX\hw\kafka-cluster
 $tables = @(
   "raw_messages",
   "source_clean",
-  "embedding_requests",
   "vector_embeddings",
   "attention_tickets",
   "annotations",
@@ -200,7 +199,6 @@ cd d:\project\ABX\hw\kafka-cluster
 $tables = @(
   "raw_messages",
   "source_clean",
-  "embedding_requests",
   "vector_embeddings",
   "attention_tickets",
   "annotations",
@@ -241,7 +239,6 @@ cd d:\project\ABX\hw\kafka-cluster
 $tables = @(
   "raw_messages",
   "source_clean",
-  "embedding_requests",
   "vector_embeddings",
   "attention_tickets",
   "annotations",
@@ -264,7 +261,6 @@ cd d:\project\ABX\hw\kafka-cluster
 $tables = @(
   "raw_messages",
   "source_clean",
-  "embedding_requests",
   "vector_embeddings",
   "attention_tickets",
   "annotations",
