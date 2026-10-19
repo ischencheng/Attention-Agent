@@ -1,0 +1,135 @@
+{
+  "observed_at": "2026-10-19T05:28:54.748899+00:00",
+  "mode": "actual_production_observation",
+  "original_record_ids": [
+    318
+  ],
+  "broker_handoff_coordinates_match": true,
+  "original_hash_matches": true,
+  "samples": [
+    {
+      "id": 1,
+      "payload": {
+        "input": {
+          "topic": "source_clean",
+          "offset": 114,
+          "partition": 0
+        },
+        "stage": "filter",
+        "trace": null,
+        "output": {
+          "topic": "fastagent_input",
+          "offset": 157,
+          "partition": 0
+        },
+        "reason": "Mentions buying a dip in TSLA and a possible premium, relating to financial markets and valuation.",
+        "source": "twitter",
+        "outcome": "pass",
+        "verdict": true,
+        "event_id": "45c2b5f367ef1f67af934492e4a77d53b3f1552eb97f8d7d126f0e6af1e89594",
+        "source_id": "twitter-2111978951438647414",
+        "classifier": {
+          "model": "gpt-6.1-sol",
+          "usage": {
+            "input_tokens": 2641,
+            "output_tokens": 39,
+            "cached_input_tokens": 2432,
+            "reasoning_output_tokens": 0,
+            "cache_write_input_tokens": 0
+          },
+          "cached": false,
+          "reason": "Mentions buying a dip in TSLA and a possible premium, relating to financial markets and valuation.",
+          "provider": "codex",
+          "cache_key": "0b8a0048acaddffbe6a8d69b96f984adbd3de4e89db048db0370e0fa73161a95",
+          "reason_status": "recorded",
+          "classification_mode": "model",
+          "classified_by_model": true,
+          "full_review_required": false
+        },
+        "raw_sha256": "122fa9448aca7429e9dcb70762e95b2aa71733837e36e26a7c6c9226281f181b",
+        "started_at": "2026-10-19T05:27:33.054496+00:00",
+        "recorded_at": "2026-10-19T05:27:38.620303+00:00",
+        "completed_at": "2026-10-19T05:27:38.614230+00:00",
+        "content_type": "social_post",
+        "output_topic": "fastagent_input",
+        "reason_status": "recorded",
+        "schema_version": 1,
+        "input_hash_kind": "canonical_json",
+        "output_acknowledged": true,
+        "input_payload_sha256": "20a30c20df31fce2fe5b7d22f36b6e168e2fd9954d7a374153016b1fc32b39d8",
+        "original_hash_status": "recorded"
+      }
+    },
+    {
+      "id": 2,
+      "payload": {
+        "input": {
+          "topic": "fastagent_input",
+          "offset": 157,
+          "partition": 0
+        },
+        "stage": "fast",
+        "trace": null,
+        "output": null,
+        "reason": "The post expresses a TSLA trading intention and an unspecified premium expectation, with no concrete facts about business performance, valuation, spending, demand or risk.",
+        "source": "twitter",
+        "outcome": "reject",
+        "verdict": false,
+        "event_id": "3a15e0c98731bbecbc0dc744164b17520b5f2ed94e8732b4d9f40578784f78d6",
+        "source_id": "twitter-2111978951438647414",
+        "classifier": {
+          "model": "gpt-6.1-sol",
+          "usage": {
+            "input_tokens": 2686,
+            "output_tokens": 49,
+            "cached_input_tokens": 2432,
+            "reasoning_output_tokens": 0,
+            "cache_write_input_tokens": 0
+          },
+          "cached": false,
+          "reason": "The post expresses a TSLA trading intention and an unspecified premium expectation, with no concrete facts about business performance, valuation, spending, demand or risk.",
+          "provider": "codex",
+          "cache_key": "b90d28bc9460b791e8d7ab9227730dbff3389699f61be3832f32f9b9fc44f377",
+          "reason_status": "recorded",
+          "classification_mode": "model",
+          "classified_by_model": true,
+          "full_review_required": false
+        },
+        "raw_sha256": "122fa9448aca7429e9dcb70762e95b2aa71733837e36e26a7c6c9226281f181b",
+        "started_at": "2026-10-19T05:27:38.620141+00:00",
+        "recorded_at": "2026-10-19T05:27:43.331109+00:00",
+        "completed_at": "2026-10-19T05:27:43.330686+00:00",
+        "content_type": "social_post",
+        "output_topic": null,
+        "reason_status": "recorded",
+        "schema_version": 1,
+        "input_hash_kind": "canonical_json",
+        "output_acknowledged": false,
+        "input_payload_sha256": "e1a83376c44c66c10c00f2a1d350165872cfc85dcf6568567b62d2da9ff7a75b",
+        "original_hash_status": "recorded"
+      }
+    }
+  ],
+  "counts_at_capture": [
+    {
+      "stage": "fast",
+      "outcome": "reject",
+      "count": 6
+    },
+    {
+      "stage": "filter",
+      "outcome": "pass",
+      "count": 6
+    },
+    {
+      "stage": "filter",
+      "outcome": "reject",
+      "count": 6
+    }
+  ],
+  "runtime_tests_passed": 73,
+  "limitations": [
+    "Forward-only collection; earlier routing reasons remain unavailable.",
+    "No investment or forecast-quality claim."
+  ]
+}
