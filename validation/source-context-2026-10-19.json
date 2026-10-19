@@ -1,0 +1,70 @@
+{
+  "observed_at": "2026-10-19T05:53:28.069116+00:00",
+  "mode": "read_only_stored_production_originals",
+  "runtime_tests_passed": 102,
+  "frontend_tests_passed": 8,
+  "container_builds": "API and frontend passed",
+  "checks": {
+    "native_reply_pair": {
+      "anchor_raw_id": 42,
+      "record_ids": [
+        420,
+        42
+      ],
+      "edges": [
+        {
+          "from_raw_id": 42,
+          "to_raw_id": 420,
+          "relation": "reply_to",
+          "verification": "native_parent_reference",
+          "version_scope": "message_identity_only"
+        }
+      ],
+      "hashes": {
+        "420": "6dade389902a372d8001875b7436d807b09d8386218c4fac791e184ab565372d",
+        "42": "ea27f0989cfe26f736cc53a9319ce60bb1358929681c25ad920fdd43e102d5ff"
+      },
+      "coverage": "locally_collected",
+      "context_scope": "recorded_reply_ancestors",
+      "frozen_evidence": false
+    },
+    "missing_parent": {
+      "anchor_raw_id": 25,
+      "missing_references": [
+        {
+          "from_raw_id": 25,
+          "source": "twitter",
+          "source_id": "twitter-2112030982941647145",
+          "native_message_id": "2112030982941647145",
+          "reason": "not_collected"
+        }
+      ]
+    },
+    "bounded_lookup": {
+      "requested": 1,
+      "returned": 1,
+      "truncated": true,
+      "max_records": 50
+    },
+    "cli_api_lineage_matches": true,
+    "unknown_record_http_status": 404,
+    "browser": {
+      "original_lookup": true,
+      "resolved_parent_42_to_420": true,
+      "missing_parent_25": true,
+      "current_context_boundary_visible": true,
+      "native_and_ingestion_times_distinct": true
+    }
+  },
+  "limitations": [
+    "Current adapter follows locally stored Twitter reply ancestors only.",
+    "A native parent reference does not identify the historical content version.",
+    "Current context is separate from evidence frozen for an earlier decision.",
+    "No external source fetches or synthetic production records were used."
+  ],
+  "runtime_health": {
+    "docker_services": 16,
+    "all_running": true,
+    "host_supervisor": "running"
+  }
+}
