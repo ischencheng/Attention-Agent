@@ -27,6 +27,42 @@ from jsonschema.exceptions import ValidationError
 _ACTIVE_PROCESSES = set()
 _ACTIVE_LOCK = threading.Lock()
 
+# Keep transport and login discovery working without inheriting unrelated host
+# credentials or interpreter startup hooks. These are exact names, not prefixes.
+MODEL_ENVIRONMENT_NAMES = frozenset({
+    "PATH", "HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "TMP", "TEMP",
+    "LANG", "LC_ALL", "LC_CTYPE", "TZ", "TERM",
+    "SYSTEMROOT", "SystemRoot", "WINDIR", "COMSPEC", "ComSpec", "PATHEXT",
+    "USERPROFILE", "HOMEDRIVE", "HOMEPATH", "APPDATA", "LOCALAPPDATA",
+    "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME",
+    "PYTHONUNBUFFERED", "PYTHONIOENCODING", "PYTHONUTF8",
+    "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
+    "http_proxy", "https_proxy", "all_proxy", "no_proxy",
+    "SSL_CERT_FILE", "SSL_CERT_DIR", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE",
+    "NODE_EXTRA_CA_CERTS", "CODEX_CA_CERTIFICATE", "OPENAI_BASE_URL",
+    "CODEX_HOME", "CODEX_API_KEY", "OPENAI_API_KEY",
+})
+RESEARCH_ENVIRONMENT_NAMES = frozenset({
+    "DB_HOST", "DB_PORT", "DB_NAME", "DB_USER", "DB_PASSWORD", "KAFKA_BOOTSTRAP",
+    "EMBEDDING_PROVIDER", "EMBEDDING_MODEL", "EMBEDDING_DIM", "EMBEDDING_GATEWAY_URL",
+    "ATTENTION_GATEWAY_TOKEN", "SEC_EDGAR_USER_AGENT", "FRED_API_KEY", "GEMINI_API_KEY",
+})
+
+
+def child_environment(profile):
+    """Admit only the selected process environment; this is not file isolation."""
+    if profile not in {"model", "research"}:
+        raise ValueError("environment_profile must be model or research")
+    allowed = MODEL_ENVIRONMENT_NAMES
+    if profile == "research":
+        allowed = allowed | RESEARCH_ENVIRONMENT_NAMES
+    env = {name: value for name, value in os.environ.items() if name in allowed}
+    # Empty optional API keys must not override a saved CLI login.
+    for name in ("CODEX_API_KEY", "OPENAI_API_KEY"):
+        if env.get(name) == "":
+            env.pop(name)
+    return env
+
 
 def stop_active_runs():
     """Terminate subprocess groups owned by this adapter, including HTTP workers."""
@@ -72,7 +108,8 @@ def _stop_process(process):
 
 
 def run(prompt, schema, cwd, output_dir, timeout, model=None, *,
-        codex_bin="codex", sandbox="workspace-write", network_access=False, disable_tools=False, model_instructions=None):
+        codex_bin="codex", sandbox="workspace-write", network_access=False, disable_tools=False,
+        model_instructions=None, environment_profile="model"):
     """Return final JSON, JSONL events, and reported usage, or raise CodexRunError.
 
     ``schema`` is a JSON Schema object, not a file path. ``output_dir`` must be
@@ -81,6 +118,8 @@ def run(prompt, schema, cwd, output_dir, timeout, model=None, *,
     explicitly because its skills connect to PostgreSQL, Kafka and data APIs.
     Authentication is provided by the caller's Codex setup or CODEX_API_KEY;
     this function never reads, copies, or logs credential files.
+    The research profile additionally admits settings consumed by project tools.
+    Neither profile restricts accessible files, allowed endpoints or tool actions.
     """
     if not isinstance(prompt, str) or not prompt.strip():
         raise ValueError("prompt must be a nonempty string")
@@ -94,8 +133,11 @@ def run(prompt, schema, cwd, output_dir, timeout, model=None, *,
         raise ValueError("model_instructions is restricted to nonempty classification instructions with disable_tools=True")
     if disable_tools and (network_access or sandbox != "read-only"):
         raise ValueError("disable_tools requires read-only sandbox with network_access=False")
+    if disable_tools and environment_profile == "research":
+        raise ValueError("disable_tools requires the model environment_profile")
     if network_access and sandbox != "workspace-write":
         raise ValueError("network_access requires workspace-write sandbox configuration")
+    env = child_environment(environment_profile)
     validator_type = validator_for(schema)
     validator_type.check_schema(schema)
     validator = validator_type(schema)
@@ -145,16 +187,12 @@ def run(prompt, schema, cwd, output_dir, timeout, model=None, *,
         "command": command, "cwd": str(cwd), "output_dir": str(output_dir),
         "model": model, "timeout_seconds": timeout, "sandbox": sandbox,
         "network_access": bool(network_access), "disable_tools": bool(disable_tools),
+        "environment_profile": environment_profile, "environment_names": sorted(env),
         "custom_model_instructions": model_instructions is not None, "success": False,
         "returncode": None, "usage": None, "cli_version": None,
     }
     events = []
     try:
-        env = os.environ.copy()
-        # Compose represents an omitted optional API key as an empty variable.
-        # Remove only that empty value so saved CLI login remains usable.
-        if env.get("CODEX_API_KEY") == "":
-            env.pop("CODEX_API_KEY")
         # --version is a local metadata query, not a model/authentication call.
         # Its stderr is deliberately not copied into logs or raised exceptions.
         try:
@@ -305,6 +343,8 @@ def main():
     parser.add_argument("--codex-bin", default="codex")
     parser.add_argument("--sandbox", choices=["read-only", "workspace-write"], default="workspace-write")
     parser.add_argument("--network-access", action="store_true")
+    parser.add_argument("--environment-profile", choices=["model", "research"],
+                        help="Default: research for --role, model for custom prompts")
     args = parser.parse_args()
     if args.role:
         state_id = os.environ.get(f"{args.role.upper()}_AGENT_ID", f"claude-{args.role}")
@@ -322,7 +362,8 @@ def main():
     output_dir = args.output_dir or Path(os.environ.get("CODEX_RUN_DIR", "/app/runs")) / f"{label}-{stamp}-{uuid.uuid4().hex[:8]}"
     try:
         result = run(prompt, schema, args.cwd, output_dir, args.timeout, args.model,
-                     codex_bin=args.codex_bin, sandbox=args.sandbox, network_access=args.network_access)
+                     codex_bin=args.codex_bin, sandbox=args.sandbox, network_access=args.network_access,
+                     environment_profile=args.environment_profile or ("research" if args.role else "model"))
     except (CodexRunError, ValueError) as exc:
         print(json.dumps({"error": str(exc), "output_dir": str(output_dir)}, ensure_ascii=False), file=sys.stderr)
         return 1

@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import importlib.util
+from contextlib import redirect_stdout
+import io
 import json
 import os
 import signal
@@ -11,6 +13,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -25,12 +28,16 @@ SCHEMA = {
 
 FAKE = r'''
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
 import time
 
 args = sys.argv[1:]
+if (Path.cwd() / "capture-environment").exists():
+    phase = "version" if args == ["--version"] else "exec"
+    (Path.cwd() / f"{phase}-environment.json").write_text(json.dumps(dict(os.environ)))
 if args == ["--version"]:
     print("codex-cli 0.163.0 (offline fake)")
     sys.exit(0)
@@ -42,6 +49,10 @@ assert args[-1] == "-"
 prompt = sys.stdin.read()
 final = Path(args[args.index("--output-last-message") + 1])
 (final.parent / "observed.json").write_text(json.dumps({"args": args, "prompt": prompt}))
+if prompt == "environment":
+    inherited = subprocess.check_output([sys.executable, "-c",
+        "import json, os; print(json.dumps(dict(os.environ)))"], text=True)
+    (final.parent / "tool-environment.json").write_text(inherited)
 print(json.dumps({"type": "thread.started", "thread_id": "offline-fake"}), flush=True)
 if prompt == "signal":
     import os
@@ -96,6 +107,98 @@ class RunnerTests(unittest.TestCase):
         observed = json.loads((self.root / "run/observed.json").read_text())
         self.assertIn("sandbox_workspace_write.network_access=true", observed["args"])
         self.assertIn("workspace-write", observed["args"])
+
+    def test_environment_profiles_restrict_real_child_and_version_processes(self):
+        common = {
+            "PATH": os.defpath, "HOME": "/offline-test-home", "LANG": "C.UTF-8",
+            "CODEX_HOME": "/offline-test-codex-home", "CODEX_API_KEY": "fixture-secret-codex",
+            "OPENAI_API_KEY": "fixture-secret-openai", "HTTPS_PROXY": "http://127.0.0.1:8123",
+            "NO_PROXY": "localhost,127.0.0.1", "SSL_CERT_FILE": "/offline-test-ca.pem",
+        }
+        research = {
+            "DB_HOST": "db.invalid", "DB_PORT": "6543", "DB_NAME": "fixture-db", "DB_USER": "fixture-user",
+            "DB_PASSWORD": "fixture-secret-db", "KAFKA_BOOTSTRAP": "broker.invalid:9092",
+            "EMBEDDING_PROVIDER": "http", "EMBEDDING_MODEL": "fixture-embedding", "EMBEDDING_DIM": "768",
+            "EMBEDDING_GATEWAY_URL": "http://127.0.0.1:8765/embed", "ATTENTION_GATEWAY_TOKEN": "fixture-secret-gateway",
+            "SEC_EDGAR_USER_AGENT": "fixture-app contact@example.test", "FRED_API_KEY": "fixture-secret-fred",
+            "GEMINI_API_KEY": "fixture-secret-gemini",
+        }
+        excluded = {
+            "UNRELATED_ENV_SENTINEL": "fixture-secret-unrelated", "GH_TOKEN": "fixture-secret-gh",
+            "GITHUB_TOKEN": "fixture-secret-github", "AWS_SECRET_ACCESS_KEY": "fixture-secret-aws",
+            "FINNHUB_API_KEY": "fixture-secret-finnhub", "CARAVO_API_KEY": "fixture-secret-caravo",
+            "TWITTER_AUTH_TOKEN": "fixture-secret-twitter", "SSH_AUTH_SOCK": "/offline-test-ssh-agent",
+            "CODEX_UNLISTED_SECRET": "fixture-secret-unlisted", "NODE_OPTIONS": "--require /offline-test-hook",
+            "PYTHONPATH": "/offline-test-import-hook", "BASH_ENV": "/offline-test-shell-hook",
+            "LD_PRELOAD": "/offline-test-loader-hook", "DYLD_INSERT_LIBRARIES": "/offline-test-loader-hook",
+        }
+        supplied = {**common, **research, **excluded}
+        (self.root / "capture-environment").touch()
+        for profile in ("model", "research"):
+            with self.subTest(profile=profile), patch.dict(os.environ, supplied, clear=True):
+                output = self.root / profile
+                runner.run("environment", SCHEMA, self.root, output, 2,
+                           codex_bin=str(self.cli), environment_profile=profile)
+                expected = common if profile == "model" else {**common, **research}
+                observations = [json.loads((self.root / f"{phase}-environment.json").read_text())
+                                for phase in ("version", "exec")]
+                observations.append(json.loads((output / "tool-environment.json").read_text()))
+                for actual in observations:
+                    for name, value in expected.items():
+                        self.assertEqual(actual.get(name), value, name)
+                    for name in excluded.keys() | (research.keys() if profile == "model" else set()):
+                        self.assertNotIn(name, actual)
+                self.assertEqual(observations[0], observations[1])
+                metadata_text = (output / "run.json").read_text()
+                metadata = json.loads(metadata_text)
+                self.assertEqual(metadata["environment_profile"], profile)
+                self.assertEqual(metadata["environment_names"], sorted(expected))
+                for value in supplied.values():
+                    if value.startswith("fixture-secret-"):
+                        self.assertNotIn(value, metadata_text)
+                self.assertEqual(dict(os.environ), supplied)
+
+    def test_default_environment_removes_empty_auth_without_changing_login_paths(self):
+        (self.root / "capture-environment").touch()
+        with patch.dict(os.environ, {"HOME": "/offline-home", "CODEX_HOME": "/offline-codex-home",
+                                    "CODEX_API_KEY": "", "OPENAI_API_KEY": "",
+                                    "DB_PASSWORD": "fixture-secret-db"}, clear=True):
+            self.invoke()
+        for phase in ("version", "exec"):
+            observed = json.loads((self.root / f"{phase}-environment.json").read_text())
+            self.assertEqual(observed["HOME"], "/offline-home")
+            self.assertEqual(observed["CODEX_HOME"], "/offline-codex-home")
+            for name in ("CODEX_API_KEY", "OPENAI_API_KEY", "DB_PASSWORD"):
+                self.assertNotIn(name, observed)
+        metadata = json.loads((self.root / "run/run.json").read_text())
+        self.assertEqual(metadata["environment_profile"], "model")
+
+    def test_invalid_environment_profile_cannot_launch_or_create_artifacts(self):
+        for options in ({"environment_profile": "inherit-all"},
+                        {"environment_profile": "research", "disable_tools": True, "sandbox": "read-only"}):
+            with self.subTest(options=options), patch.object(runner.subprocess, "run") as version, \
+                    patch.object(runner.subprocess, "Popen") as execute:
+                with self.assertRaisesRegex(ValueError, "environment_profile"):
+                    self.invoke(**options)
+                version.assert_not_called()
+                execute.assert_not_called()
+                self.assertFalse((self.root / "run").exists())
+
+    def test_cli_selects_research_for_roles_and_model_for_custom_prompts(self):
+        prompt_path, schema_path = self.root / "prompt.txt", self.root / "schema.json"
+        prompt_path.write_text("offline custom prompt")
+        schema_path.write_text(json.dumps(SCHEMA))
+        cases = [(["--role", "mid"], "research"), (["--role", "strong"], "research"),
+                 (["--prompt-file", str(prompt_path), "--schema", str(schema_path)], "model"),
+                 (["--prompt-file", str(prompt_path), "--schema", str(schema_path),
+                   "--environment-profile", "research"], "research")]
+        result = {"final": {"status": "completed"}, "usage": None, "output_dir": "offline-run"}
+        for arguments, expected in cases:
+            with self.subTest(arguments=arguments), \
+                    patch.object(sys, "argv", ["codex_runner.py", *arguments]), \
+                    patch.object(runner, "run", return_value=result) as execute, redirect_stdout(io.StringIO()):
+                self.assertEqual(runner.main(), 0)
+                self.assertEqual(execute.call_args.kwargs["environment_profile"], expected)
 
     def test_classification_disables_tools_and_project_instructions(self):
         self.invoke(disable_tools=True, sandbox="read-only")
