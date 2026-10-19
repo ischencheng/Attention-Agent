@@ -205,7 +205,7 @@ def routing_decision_hash(payload: dict[str, Any]) -> str:
 
 def insert_routing_event(cursor: Any, msg: Message, payload: dict[str, Any]) -> None:
     coordinates = payload.get("input")
-    if (payload.get("schema_version") != 1 or payload.get("stage") not in {"filter", "fast"}
+    if (payload.get("schema_version") != 1 or payload.get("stage") not in {"relay", "filter", "fast"}
             or type(payload.get("verdict")) is not bool
             or payload.get("outcome") != ("pass" if payload["verdict"] else "reject")
             or not isinstance(coordinates, dict) or set(coordinates) != {"topic", "partition", "offset"}

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { evidenceLabel, lastRevision, rawRecordId, recordKey, researchTitle, routingDisposition, routingGroups, safeSourceUrl, sourceText, sourceTimes, traceStages } from "./traceModel.js";
+import { classificationPresentation, evidenceLabel, isInputRelay, lastRevision, rawRecordId, recordKey, researchTitle, routingDisposition, routingGroups, routingStageLabel, safeSourceUrl, sourceText, sourceTimes, ticketClassifications, traceStages } from "./traceModel.js";
 
 test("missing routing telemetry cannot imply rejection", () => {
   assert.equal(routingDisposition({}), "Not recorded");
@@ -64,4 +64,40 @@ test("conversation requests use only authoritative positive raw record IDs", () 
   assert.equal(rawRecordId({ id: "twitter-2111978951438647414" }), null);
   assert.equal(rawRecordId({ id: -1 }), null);
   assert.equal(rawRecordId({ id: true }), null);
+});
+
+test("relay forwarding is not presented as a model classification", () => {
+  const classifier = { classification_mode: "relay", classified_by_model: false, provider: "routing-policy", model: null, usage: null };
+  const event = { stage: "relay", outcome: "pass", verdict: true, classifier };
+  assert.equal(routingStageLabel(event), "Input relay");
+  assert.equal(routingDisposition(event), "Forwarded");
+  assert.equal(routingDisposition({ stage: "relay", outcome: "reject", classifier }), "Not forwarded");
+  assert.equal(isInputRelay({ stage: "relay", payload: event }), true);
+  assert.equal(classificationPresentation(classifier, "relay").model, "No model call");
+  assert.equal(classificationPresentation(classifier, "relay").usage, null);
+  assert.equal(classificationPresentation({ classification_mode: "invalid_json", classified_by_model: false }, "relay").model, "No model call");
+  const historical = { stage: "filter", outcome: "pass", classifier: { model: "gpt-6.1-sol", classified_by_model: true, classification_mode: "model" } };
+  assert.equal(routingStageLabel(historical), "Relevance filter");
+  assert.equal(routingDisposition(historical), "Passed");
+  assert.equal(isInputRelay(historical), false);
+  assert.equal(routingDisposition({ stage: "fast", outcome: "reject", verdict: true }), "Filtered out");
+});
+
+test("cached token counts stay historical and preserve the producing model", () => {
+  const cached = classificationPresentation({ model: "gpt-6.1-sol", cached: true, classified_by_model: true, usage: { input_tokens: 2100 } });
+  assert.equal(cached.model, "gpt-6.1-sol");
+  assert.match(cached.execution, /no model call for this request/);
+  assert.equal(cached.usageTitle, "Historical cached-result usage");
+  assert.match(cached.usageNote, /not new model usage or newly billed usage/);
+  assert.equal(cached.usage.input_tokens, 2100);
+  const unknown = classificationPresentation({ model: "gpt-6.1-sol", usage: { input_tokens: 500 } });
+  assert.match(unknown.usageNote, /cannot be attributed to a new model call/);
+  assert.match(classificationPresentation({ model: "gpt-6.1-sol", cached: false }).execution, /not served from cache/);
+});
+
+test("new tickets do not invent a legacy relevance-filter card", () => {
+  const fast = { model: "gpt-6.1-sol", classification_mode: "model" };
+  assert.deepEqual(ticketClassifications({ fast_agent: fast }), [["Fast", fast]]);
+  assert.deepEqual(ticketClassifications({ fast_agent: fast, local_ml_filter: { model: "old-model" } }).map(([label]) => label), ["Relevance filter", "Fast"]);
+  assert.deepEqual(ticketClassifications({}), []);
 });

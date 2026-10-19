@@ -123,6 +123,9 @@ def cycle(role, *, force=False):
 
 
 def _cycle_locked(role, force, previous, status_path, attempt):
+    model = (os.environ.get(f"{role.upper()}_CODEX_MODEL")
+             or os.environ.get("CODEX_MODEL")
+             or ("gpt-6-luna" if role == "mid" else "gpt-6.1-sol"))
     versions = signature(role)
     processed = dict(previous.get("processed_versions", {}))
     pending = sorted((int(key) for key, value in versions.items()
@@ -148,7 +151,7 @@ def _cycle_locked(role, force, previous, status_path, attempt):
                  "selected_input_versions": {str(key): versions[str(key)] for key in selected},
                  "version_encoding": "MD5 of PostgreSQL payload::text for scheduler acknowledgment",
                  "daily_review": daily_review, "forced": force,
-                 "model": os.environ.get("CODEX_MODEL") or "gpt-6.1-sol"})
+                 "model": model})
     review_field = "reviewed_ticket_ids" if role == "mid" else "reviewed_annotation_ids"
     prompt += (f"\nUse {PYTHON} for every Python skill. Current UTC time is {now()}. "
                f"The scheduler selected these oldest pending {table} IDs: {json.dumps(selected)}. "
@@ -169,7 +172,7 @@ def _cycle_locked(role, force, previous, status_path, attempt):
     started = datetime.now(timezone.utc)
     result = run(prompt, CYCLE_SCHEMA, workspace, output,
                  float(os.environ.get("CODEX_TIMEOUT_SECONDS", "900")),
-                 os.environ.get("CODEX_MODEL") or "gpt-6.1-sol",
+                 model,
                  codex_bin=os.environ.get("CODEX_BIN", str(CODEX)), network_access=True)
     with connect() as conn, conn.cursor() as cur:
         cur.execute("SELECT updated_at FROM agent_state WHERE agent_id=%s", (state_id,))

@@ -1,5 +1,8 @@
 # 本地完整流水线
 
+> The current deployment uses one Fast model filter. See the updated
+> [English runtime guide](LOCAL_RUNTIME.md) for the relay, role models and upgrade.
+
 本地部署沿用项目的消息链路：
 
 `Twitter/官方 RSS → source_raw → Flink → source_clean → Codex 相关性过滤 → Fast → attention_tickets → Mid → annotations → Strong → decision_packets`

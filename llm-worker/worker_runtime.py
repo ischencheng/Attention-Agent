@@ -98,7 +98,7 @@ def routing_event(msg: Any, payload: dict[str, Any] | None, *, stage: str, verdi
                   output_topic: str | None = None, output: dict[str, Any] | None = None) -> dict[str, Any]:
     """Describe the observed routing attempt without manufacturing model reasons."""
     coordinates = {"topic": msg.topic(), "partition": msg.partition(), "offset": msg.offset()}
-    if (stage not in {"filter", "fast"} or type(verdict) is not bool
+    if (stage not in {"relay", "filter", "fast"} or type(verdict) is not bool
             or not isinstance(coordinates["topic"], str)
             or any(type(coordinates[key]) is not int or coordinates[key] < 0 for key in ("partition", "offset"))):
         raise ValueError("Routing events require a valid stage, verdict and Kafka input coordinates")
@@ -130,10 +130,13 @@ def publish_routing_event(producer: Any, event: dict[str, Any], topic: str) -> N
 
 def reject_invalid_record(msg: Any, producer: Any, consumer: Any, *, stage: str, topic: str) -> None:
     at = utcnow()
+    classifier = {"provider": "routing-policy", "model": None,
+                  "classified_by_model": False, "classification_mode": "invalid_json",
+                  "reason": None, "reason_status": "not_recorded"}
+    if stage == "relay":
+        classifier["usage"] = None
     event = routing_event(msg, None, stage=stage, verdict=False,
-                          classifier={"provider": "routing-policy", "model": None,
-                                      "classified_by_model": False, "classification_mode": "invalid_json",
-                                      "reason": None, "reason_status": "not_recorded"},
+                          classifier=classifier,
                           started_at=at, completed_at=at)
     publish_routing_event(producer, event, topic)
     consumer.commit(message=msg, asynchronous=False)

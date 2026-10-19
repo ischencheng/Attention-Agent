@@ -1,7 +1,7 @@
 import { useEffect, useId, useMemo, useState } from "react";
 import RecordedConversation from "./RecordedConversation";
-import { asArray, evidenceLabel, graphNodes, lastRevision, rawRecordId, readable, recordKey, researchTitle,
-  routingDisposition, routingGroups, sourceText, sourceTimes, sourceUrl, traceStages } from "./traceModel.js";
+import { asArray, classificationPresentation, evidenceLabel, graphNodes, isInputRelay, lastRevision, rawRecordId, readable, recordKey, researchTitle,
+  routingDisposition, routingGroups, routingStageLabel, sourceText, sourceTimes, sourceUrl, ticketClassifications, traceStages } from "./traceModel.js";
 
 const apiBase = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
 const formatTime = (value) => value && !Number.isNaN(new Date(value).getTime()) ? new Date(value).toLocaleString() : "Not recorded";
@@ -67,30 +67,46 @@ function RecordedList({ title, items, empty = "None recorded" }) {
 function RoutingRecord({ node }) {
   const payload = node.payload || {};
   const classification = payload.classifier || payload.classification || payload;
-  const verdict = routingDisposition({ ...classification, outcome: payload.outcome, verdict: payload.verdict ?? classification.verdict });
+  const verdict = routingDisposition({ ...classification, stage: payload.stage, outcome: payload.outcome, verdict: payload.verdict ?? classification.verdict });
+  const relay = isInputRelay(payload);
+  const display = classificationPresentation(classification, payload.stage);
   return <article className="trace-record">
-    <div className="trace-record-heading"><strong>{humanize(payload.stage || node.title || "Routing event")}</strong><span className={`trace-pill ${verdict === "Filtered out" ? "pill-neutral" : ""}`}>{verdict}</span></div>
-    <p>{payload.reason || classification.reason || "The classification reason was not recorded."}</p>
-    <Metadata values={[["Recorded", formatTime(payload.recorded_at || node.timestamp)], ["Model", classification.model || payload.model],
+    <div className="trace-record-heading"><strong>{routingStageLabel(payload)}</strong><span className={`trace-pill ${verdict === "Filtered out" ? "pill-neutral" : ""}`}>{verdict}{relay ? " · No model call" : ""}</span></div>
+    <p>{payload.reason || classification.reason || (relay ? (verdict === "Forwarded" ? "The original input was forwarded without a model classification." : "Relay handling was recorded without a model classification.") : "The classification reason was not recorded.")}</p>
+    <Metadata values={[["Recorded", formatTime(payload.recorded_at || node.timestamp)], ["Result model", display.model], ["Execution", display.execution],
       ["Attempt started", formatTime(payload.started_at)], ["Attempt completed", formatTime(payload.completed_at)],
-      ["Model classification", typeof classification.classified_by_model === "boolean" ? (classification.classified_by_model ? "Yes" : "No · routing policy") : null],
+      ["Verdict origin", typeof classification.classified_by_model === "boolean" ? (classification.classified_by_model ? "Model classification" : "Routing policy") : null],
       ["Coverage", classification.classification_mode], ["Full review required", typeof classification.full_review_required === "boolean" ? (classification.full_review_required ? "Yes" : "No") : null],
       ["Source ID", payload.source_id], ["Input payload hash", payload.input_payload_sha256], ["Original raw hash", payload.raw_sha256],
       ["Runtime trace ID", node.runtime_trace_id || payload.runtime_trace_id],
       ["Runtime trace coverage", humanize(node.runtime_trace_status || payload.runtime_trace_status)]]} />
+    <ClassificationUsage display={display} />
   </article>;
+}
+
+function ClassificationUsage({ display }) {
+  if (!display.usage) return null;
+  return <Disclosure className="classification-usage" label={display.usageTitle}>
+    <p className="muted">{display.usageNote}</p>
+    <Metadata values={Object.entries(display.usage).map(([key, value]) => [humanize(key), value])} />
+  </Disclosure>;
 }
 
 function TicketRecord({ node }) {
   const payload = node.payload || {};
+  const classifications = ticketClassifications(payload);
   return <article className="trace-record">
     <div className="trace-record-heading"><strong>Attention ticket #{node.record_id}</strong><span className="trace-pill">Accepted for research</span></div>
     <p>{payload.data?.title || payload.data?.text || "No source excerpt recorded."}</p>
-    <div className="classification-pair">{[["Relevance filter", payload.local_ml_filter], ["Fast", payload.fast_agent]].map(([name, result]) => <div key={name}>
+    <div className="classification-pair">{classifications.map(([name, result]) => { const display = classificationPresentation(result); return <div key={name}>
       <h4>{name}</h4><p>{result?.reason || "Reason not recorded for this ticket."}</p>
-      <span className="muted">{result?.model || "Model not recorded"} · {humanize(result?.classification_mode || "coverage_not_recorded")}</span>
+      <span className="muted">{display.model} · {humanize(result?.classification_mode || "coverage_not_recorded")}</span>
+      <p className="muted">{display.execution}</p>
+      {result.cached === true && <p className="trace-warning">Stored classification reused. Any recorded token counts describe its original computation.</p>}
+      <ClassificationUsage display={display} />
       {result?.full_review_required && <p className="trace-warning">Full source review required</p>}
-    </div>)}</div>
+    </div>; })}</div>
+    {!classifications.length && <p className="muted">Classification metadata was not recorded in this ticket.</p>}
     <Metadata values={[["Source", payload.source], ["Source ID", payload.source_id], ["Ticket recorded", formatTime(node.timestamp)]]} />
   </article>;
 }
@@ -190,7 +206,7 @@ function TracePath({ graph, item, detail, evidence }) {
     <div className="trace-stage-content" aria-live="polite">
       {activeStage === "originals" && <><h3>Original evidence</h3><p className="muted">{historical ? "Authoritative originals resolved from the decision’s frozen evidence snapshot." : "Actual source records linked to this research. Publication time and observation time are separate."}</p>
         {originalRows.length ? originalRows.map((row) => <SourceRecord key={row.id} row={row} />) : <p className="trace-empty">No resolvable original records in this trace. This is a lineage gap, not proof that no evidence exists.</p>}</>}
-      {activeStage === "routing" && <><h3>Routing dispositions</h3><p className="muted">Recorded filter and Fast verdicts, including rejects when available. Missing telemetry cannot establish that a message was rejected.</p>
+      {activeStage === "routing" && <><h3>Routing dispositions</h3><p className="muted">Input relay forwarding and Fast classification, with historical relevance-filter results retained. Forwarding does not call a model; missing telemetry cannot establish rejection.</p>
         {routing.length ? routing.map((node) => <RoutingRecord key={node.id} node={node} />) : <p className="trace-empty">No routing audit was recorded for these original versions. Earlier tickets preserve acceptance but may not preserve a reason.</p>}</>}
       {activeStage === "tickets" && <><h3>Fast attention selection</h3><p className="muted">A ticket routes attention to further research; it is not an investment decision.</p>
         {tickets.length ? tickets.map((node) => <TicketRecord key={node.id} node={node} />) : <p className="trace-empty">No linked ticket records available.</p>}</>}
@@ -315,7 +331,7 @@ function RoutingActivity({ refresh }) {
         <strong>{group.title || group.source || "Unknown source"}</strong>
         {group.excerpt && <span className="research-item-preview">{group.excerpt}</span>}
         <span className="routing-source-id">{group.source_id || "Source identity unavailable"}</span>
-        <span className="routing-verdicts">{group.events.map((event) => <span key={event.id} className={`trace-pill ${event.outcome === "reject" ? "pill-rejected" : ""}`}>{humanize(event.stage)} · {routingDisposition(event)}</span>)}</span>
+        <span className="routing-verdicts">{group.events.map((event) => <span key={event.id} className={`trace-pill ${event.outcome === "reject" ? "pill-rejected" : ""}`}>{routingStageLabel(event)} · {routingDisposition(event)}{isInputRelay(event) ? " · No model call" : ""}</span>)}</span>
         <time>{formatTime(group.events[0].payload?.recorded_at || group.events[0].created_at)}</time>
       </button>)}</div>
       <div className="routing-detail">

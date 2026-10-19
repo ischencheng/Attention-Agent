@@ -50,6 +50,17 @@ coverage metadata when available. Older missing reasons are not backfilled with
 new explanations. No synthetic success label, market prediction or trade is
 created to complete an otherwise empty stage.
 
+The upstream `source_clean` delivery hop records `stage=relay`: it forwards the
+original envelope without a model call. Fast is the single model filter in the
+default local deployment. Older `stage=filter` events keep their original model
+metadata and reasons. Distinct stage identities allow a pending old input to be
+delivered under the new relay policy without rewriting its earlier audit.
+
+Cached verdicts retain the producing model and its historical usage. Displaying
+that usage does not establish new token consumption. Long-source chunking,
+retries and policy bypasses mean one logical filter is not a promise of exactly
+one model invocation for every observation.
+
 The source-context view is a separate, read-only lookup anchored to an original
 record. It follows recorded native Twitter reply ancestors within the same source
 namespace and validates the native identity of each stored candidate. Returned
@@ -81,6 +92,7 @@ the sink and classifiers:
 
 ```sh
 docker compose exec -T postgres psql -U bluesky -d bluesky -v ON_ERROR_STOP=1 < postgres/init/003_routing_events.sql
+docker compose exec -T postgres psql -U bluesky -d bluesky -v ON_ERROR_STOP=1 < postgres/init/004_relay_routing_stage.sql
 ```
 
 Fresh PostgreSQL volumes apply this file during initialization. Neither upgrade

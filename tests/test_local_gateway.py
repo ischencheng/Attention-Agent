@@ -7,7 +7,7 @@ from pathlib import Path
 import tempfile
 import threading
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 from http.server import ThreadingHTTPServer
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError
@@ -72,6 +72,26 @@ class GatewayTests(unittest.TestCase):
             self.gateway.embed({"text": "New message"})
         self.runner.assert_not_called()
         self.factory.assert_not_called()
+
+    def test_prompt_policy_change_invalidates_previous_classification_cache(self):
+        request = {**self.request, "role": "fast"}
+        with patch.object(gateway_module, "PROMPT_VERSION", "attention-classification-v2"):
+            old = self.gateway.classify(request)
+        current = self.gateway.classify(request)
+        replay = self.gateway.classify(request)
+        self.assertNotEqual(old["cache_key"], current["cache_key"])
+        self.assertFalse(current["cached"])
+        self.assertTrue(replay["cached"])
+        self.assertEqual(self.runner.call_count, 2)
+
+    def test_single_fast_gate_uses_scope_and_preserves_single_observation_boundary(self):
+        self.gateway.classify({**self.request, "role": "fast"})
+        prompt = self.runner.call_args.args[0]
+        self.assertIn("No upstream model has screened", prompt)
+        self.assertIn("datacenter,power", prompt)
+        self.assertIn("concrete, potentially useful information", prompt)
+        self.assertIn("do not claim novelty or corroboration", prompt)
+        self.assertEqual(self.runner.call_count, 1)
 
     def test_provider_failure_is_never_cached(self):
         self.runner.side_effect = RuntimeError("failed")

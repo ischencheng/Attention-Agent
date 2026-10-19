@@ -364,9 +364,6 @@ services:
     networks: [backend]
     environment:
       PYTHONUNBUFFERED: "1"
-      CODEX_GATEWAY_URL: "${CODEX_GATEWAY_URL:-http://host.docker.internal:8765/classify}"
-      ATTENTION_GATEWAY_TOKEN: "${ATTENTION_GATEWAY_TOKEN:-}"
-      GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
       OTEL_SERVICE_NAME: local-ml-filter
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
     command:
@@ -380,14 +377,8 @@ services:
       - "fastagent_input"
       - "--group-id"
       - "local-ml-filter-v1"
-      - "--threshold"
-      - "0.55"
       - "--llm-provider"
-      - "${CLASSIFICATION_PROVIDER:-codex}"
-      - "--llm-model"
-      - "${CLASSIFICATION_MODEL:-gpt-6.1-sol}"
-      - "--llm-timeout-seconds"
-      - "240"
+      - "relay"
       - "--metrics-port"
       - "8031"
     ports:
@@ -479,7 +470,7 @@ services:
       - "--llm-provider"
       - "${CLASSIFICATION_PROVIDER:-codex}"
       - "--llm-model"
-      - "${CLASSIFICATION_MODEL:-gpt-6.1-sol}"
+      - "${CLASSIFICATION_MODEL:-gpt-6-luna}"
       - "--llm-timeout-seconds"
       - "240"
       - "--metrics-port"

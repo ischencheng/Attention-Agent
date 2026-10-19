@@ -5,6 +5,7 @@ import copy
 from datetime import datetime, timedelta, timezone
 import importlib.util
 import json
+import os
 from pathlib import Path
 import re
 import signal
@@ -70,6 +71,29 @@ class SchedulerTests(unittest.TestCase):
 
     def status(self, role="mid"):
         return json.loads((self.runtime / f"{role}.json").read_text())
+
+    def test_role_models_are_used_for_calls_and_audit_events(self):
+        with patch.dict(os.environ, {"CODEX_MODEL": "fallback-model",
+                                    "MID_CODEX_MODEL": "light-model",
+                                    "STRONG_CODEX_MODEL": "strong-model"}):
+            for role, expected in (("mid", "light-model"), ("strong", "strong-model")):
+                result = supervisor.cycle(role)
+                self.assertEqual(self.run.call_args.args[5], expected)
+                events = [json.loads(path.read_text()) for path in
+                          (self.runtime / "cycle-audit" / result["cycle_id"]).glob("*.json")]
+                started = next(event for event in events if event["event"] == "started")
+                self.assertEqual(started["model"], expected)
+
+    def test_blank_role_model_uses_generic_fallback(self):
+        with patch.dict(os.environ, {"MID_CODEX_MODEL": "", "CODEX_MODEL": "fallback-model"}):
+            supervisor.cycle("mid")
+        self.assertEqual(self.run.call_args.args[5], "fallback-model")
+
+    def test_no_model_configuration_uses_role_defaults(self):
+        with patch.dict(os.environ, {"CODEX_MODEL": "", "MID_CODEX_MODEL": "", "STRONG_CODEX_MODEL": ""}):
+            for role, expected in (("mid", "gpt-6-luna"), ("strong", "gpt-6.1-sol")):
+                supervisor.cycle(role)
+                self.assertEqual(self.run.call_args.args[5], expected)
 
     def test_unchanged_backlog_drains_in_bounded_batches_without_new_arrivals(self):
         first = supervisor.cycle("mid")
