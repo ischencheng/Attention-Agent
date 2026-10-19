@@ -22,7 +22,8 @@ from starlette.responses import Response
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.append(str(Path(__file__).resolve().parent.parent / "skills"))
 from evidence import verify_evidence
-from trace_api import cycle_list, research_detail, research_list, routing_list, trace_detail
+from trace_api import clean, cycle_list, research_detail, research_list, routing_list, trace_detail
+from source_context import source_context
 
 
 LOGGER = logging.getLogger("backend-fastapi")
@@ -420,6 +421,21 @@ async def api_cycles(limit: int = Query(default=30, ge=1, le=100)) -> dict[str, 
 @app.get("/api/routing")
 async def api_routing(limit: int = Query(default=20, ge=1, le=100)) -> dict[str, Any]:
     return await db_call(routing_list, get_conn, limit)
+
+
+@app.get("/api/raw/{record_id}/context")
+async def api_source_context(record_id: int, limit: int = Query(default=30, ge=1, le=50)) -> Any:
+    if record_id <= 0:
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=400, content={"detail": "raw record ID must be positive"})
+    result = await db_call(source_context, get_conn, record_id, limit)
+    if result is None:
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=404, content={"detail": "not found"})
+    # Same browser display policy as other trace endpoints. Hashes were computed
+    # from complete authoritative originals before any display redaction.
+    result["warnings"].append("Displayed source fields may be redacted or bounded; raw hashes cover the complete stored originals.")
+    return clean(result)
 
 
 @app.get("/api/decisions")
