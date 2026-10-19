@@ -211,6 +211,28 @@ class JudgmentValidationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.validate(final, [one, revised])
 
+    def test_one_document_can_supply_both_support_and_counterevidence(self):
+        release = observed(raw={
+            "title": "Official customer commitment and operating conditions",
+            "commitment": "Two-year minimum purchase commitment covers 70% of planned capacity.",
+            "conditions": "Acceptance remains pending; contract price and unit costs are undisclosed.",
+        })
+        final = batch(discovery([release], counter=[release]))
+        final["discoveries"][0]["statement"] = (
+            "A customer commitment supports demand visibility, while pending acceptance "
+            "and undisclosed economics prevent a conclusion about durable profitability."
+        )
+        result = self.validate(final, [release])
+        thesis = result["discoveries"][0]
+        self.assertEqual(thesis["evidence_ids"], [release["id"]])
+        self.assertEqual(thesis["counterevidence_ids"], [release["id"]])
+        self.assertEqual(thesis["observed_event_ids"], [release["event_id"]])
+
+        # Different argumentative roles do not create two observed events.
+        thesis["observed_event_ids"].append(release["event_id"])
+        with self.assertRaises(ValueError):
+            self.validate(final, [release])
+
     def test_duplicate_revision_without_new_evidence_is_rejected(self):
         item = observed()
         original = discovery([item])

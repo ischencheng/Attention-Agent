@@ -42,8 +42,9 @@ def validate_final(final, observations, previous, as_of):
         refs = thesis["evidence_ids"] + thesis["counterevidence_ids"]
         if not refs or not set(refs) <= visible.keys():
             raise ValueError("every thesis needs visible, existing original evidence")
-        if set(thesis["evidence_ids"]) & set(thesis["counterevidence_ids"]):
-            raise ValueError("support and counterevidence references must be distinct")
+        # References identify entire documents, which may contain both a
+        # supporting fact and a limiting/contradictory fact. Count each source
+        # event once below; overlap is not independent corroboration.
         events = {visible[r]["event_id"] for r in refs}
         if set(thesis["observed_event_ids"]) != events or len(thesis["observed_event_ids"]) != len(events):
             raise ValueError("source event IDs must exactly deduplicate referenced observations")
