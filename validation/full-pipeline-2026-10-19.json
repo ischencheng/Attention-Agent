@@ -1,0 +1,168 @@
+{
+  "observed_at": "2026-10-19T05:19:50.099835+00:00",
+  "code_commit": "4bbf485bdcb41d146bf9b05f253f127115f305ab",
+  "overview": {
+    "raw_count": 598,
+    "clean_count": 1115,
+    "ticket_count": 34,
+    "annotation_count": 1,
+    "decision_count": 0,
+    "embedding_count": 113,
+    "sources": {
+      "Federal Reserve releases": 5,
+      "OpenAI news": 22,
+      "twitter": 551,
+      "sec_edgar": 3,
+      "AMD investor releases": 1,
+      "NVIDIA official blog": 16
+    },
+    "agents": [
+      {
+        "agent_id": "claude-mid",
+        "updated_at": "2026-10-19T05:02:53.619818Z",
+        "pending_theme_count": 13,
+        "thesis_count": 0,
+        "role": "mid"
+      },
+      {
+        "agent_id": "claude-strong",
+        "updated_at": "2026-10-19T04:59:12.751776Z",
+        "pending_theme_count": 0,
+        "thesis_count": 1,
+        "role": "strong"
+      }
+    ]
+  },
+  "gateway": {
+    "cached_responses": {
+      "classify": 322,
+      "embed": 112
+    },
+    "classification_model": "gpt-6.1-sol",
+    "embedding_loaded": true,
+    "embedding_model": "sentence-transformers/all-mpnet-base-v2",
+    "status": "ok"
+  },
+  "supervisor": {
+    "updated_at": "2026-10-19T05:19:47.882811+00:00",
+    "children": {
+      "gateway": {
+        "pid": 34612,
+        "running": true
+      },
+      "rss": {
+        "pid": 34613,
+        "running": true
+      }
+    },
+    "active_cycles": {},
+    "errors": {}
+  },
+  "launch_agent_running": true,
+  "cycles": {
+    "mid": {
+      "status": "completed",
+      "completed_at": "2026-10-19T05:02:57.801239+00:00",
+      "state_verified": true,
+      "result": {
+        "status": "completed",
+        "published_count": 0,
+        "state_saved": true,
+        "blockers": []
+      }
+    },
+    "strong": {
+      "status": "completed",
+      "completed_at": "2026-10-19T04:59:17.291964+00:00",
+      "state_verified": true,
+      "result": {
+        "status": "completed",
+        "published_count": 0,
+        "state_saved": true,
+        "blockers": []
+      }
+    }
+  },
+  "docker_services": {
+    "backend-fastapi": "running",
+    "embed-worker": "running",
+    "fast-agent": "running",
+    "flink-job": "running",
+    "flink-jobmanager": "running",
+    "flink-taskmanager": "running",
+    "frontend-react": "running",
+    "jaeger": "running",
+    "kafka1": "running",
+    "kafka2": "running",
+    "kafka3": "running",
+    "local-ml-filter": "running",
+    "otel-collector": "running",
+    "postgres": "running",
+    "sink-consumer": "running",
+    "twitter-ingestor": "running"
+  },
+  "flink": [
+    {
+      "job_id": "6a43b93c0333ed600c8e87a34bb70a95",
+      "state": "RUNNING",
+      "checkpoint_counts": {
+        "restored": 0,
+        "total": 23,
+        "in_progress": 0,
+        "completed": 23,
+        "failed": 0
+      }
+    }
+  ],
+  "production_evaluation": {
+    "mode": "production_forward",
+    "ledger_hash": "84711efa1b440acd02947bf20daac303283c1b9e09897f5e1e0cfffa9695068e",
+    "decision_packets": 0,
+    "frozen_versions": 0,
+    "research_state_agents": 1,
+    "research_state_versions": 1,
+    "latest_research_states": [
+      {
+        "key": "attention-agent:agent_state:claude-strong:v1",
+        "hash": "12f88ca2e5e93a2668421469b91b0505c0a109dbdf1c737d5be410c28628baed",
+        "stable_id": "attention-agent:agent_state:claude-strong",
+        "agent_id": "claude-strong",
+        "version": 1,
+        "updated_at": "2026-10-19T04:59:12.751776+00:00",
+        "frozen_at": "2026-10-19T05:12:04.637641+00:00",
+        "state_sha256": "40aa0ab36d0598550807b41de3dba41fb4d905e983c2dbf504e7dee6ca822cc2",
+        "thesis_count": 1,
+        "pending_theme_count": 0,
+        "evaluation_status": "unscored_application_research"
+      }
+    ],
+    "resolved_price_observations": 0,
+    "resolved_predeclared_forecasts": 0,
+    "mean_brier": null,
+    "decisions": [],
+    "fundamental_thesis_correctness": "not automatically graded; compare independent later evidence with the frozen thesis",
+    "limitations": [
+      "observer of pipeline publications; does not generate decisions",
+      "Strong working memory is archived as unscored research, not independently verified decisions",
+      "application thesis IDs are recorded only when explicitly supplied",
+      "no inferred probability from confidence, actions or prose",
+      "price observations are not trades, portfolio returns or proof of business-thesis correctness",
+      "first observer freeze can be later than application publication",
+      "edits occurring between observer cycles are not recoverable from the application DB"
+    ]
+  },
+  "checks": {
+    "runtime_tests": 62,
+    "agent_tests": 20,
+    "judgment_tests": 91,
+    "rss_tests": 5,
+    "independent_provenance_cases": 10
+  },
+  "limitations": [
+    "Point-in-time observation of a local deployment; the host and Docker must remain running.",
+    "Clean records are at-least-once deliveries, including recovery replays; counts are not unique originals.",
+    "Research state is unscored. No published production decisions or resolved market forecasts exist at this capture.",
+    "FRED requires a locally configured API key and has not completed an authenticated live query.",
+    "Observer polling cannot recover research edits overwritten between observations."
+  ]
+}

@@ -1,5 +1,7 @@
 # Development workflow
 
+Use English for issues, pull requests and commit messages.
+
 For a concrete problem, open an issue describing the observed behavior and
 acceptance criteria before starting new implementation. Check for an existing
 issue first. Keep one independently reviewable problem in each PR, with logical
