@@ -48,6 +48,7 @@ class GatewayTests(unittest.TestCase):
         self.assertEqual(self.runner.call_count, 1)
         self.assertTrue(self.runner.call_args.kwargs["disable_tools"])
         self.assertEqual(self.runner.call_args.kwargs["sandbox"], "read-only")
+        self.assertEqual(self.runner.call_args.kwargs["environment_profile"], "model")
         self.assertEqual(first["usage"], {"input_tokens": 100, "output_tokens": 10})
 
     def test_concurrent_retries_share_single_model_run(self):

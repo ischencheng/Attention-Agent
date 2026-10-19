@@ -45,6 +45,13 @@ remain available for explicit standalone use; opting into them reintroduces an
 upstream classifier. Fast's legacy `local` scoring provider depends on the old
 filter score and is not compatible with the byte-preserving relay.
 
+Codex child processes use explicit environment profiles: Fast receives the
+`model` profile, and Mid/Strong receive the `research` profile required by their
+current tools. Run metadata records profile and variable names without values.
+This limits implicit inheritance; it does not isolate the research agents from
+host files or privileged storage services. See the implemented controls and
+remaining work in [agent execution boundaries](SECURITY_BOUNDARIES.md).
+
 ## Upgrade the routing audit
 
 Before rebuilding the sink and relay on an existing database:

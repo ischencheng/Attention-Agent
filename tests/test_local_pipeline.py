@@ -79,10 +79,12 @@ class SchedulerTests(unittest.TestCase):
             for role, expected in (("mid", "light-model"), ("strong", "strong-model")):
                 result = supervisor.cycle(role)
                 self.assertEqual(self.run.call_args.args[5], expected)
+                self.assertEqual(self.run.call_args.kwargs["environment_profile"], "research")
                 events = [json.loads(path.read_text()) for path in
                           (self.runtime / "cycle-audit" / result["cycle_id"]).glob("*.json")]
                 started = next(event for event in events if event["event"] == "started")
                 self.assertEqual(started["model"], expected)
+                self.assertEqual(started["environment_profile"], "research")
 
     def test_blank_role_model_uses_generic_fallback(self):
         with patch.dict(os.environ, {"MID_CODEX_MODEL": "", "CODEX_MODEL": "fallback-model"}):
