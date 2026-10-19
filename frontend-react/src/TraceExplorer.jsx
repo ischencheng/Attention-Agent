@@ -1,5 +1,6 @@
 import { useEffect, useId, useMemo, useState } from "react";
-import { asArray, evidenceLabel, graphNodes, lastRevision, readable, recordKey, researchTitle,
+import RecordedConversation from "./RecordedConversation";
+import { asArray, evidenceLabel, graphNodes, lastRevision, rawRecordId, readable, recordKey, researchTitle,
   routingDisposition, routingGroups, sourceText, sourceTimes, sourceUrl, traceStages } from "./traceModel.js";
 
 const apiBase = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
@@ -29,14 +30,16 @@ export function EvidenceStatus({ evidence }) {
   </div>;
 }
 
-export function SourceRecord({ row, label }) {
+export function SourceRecord({ row, label, allowContext = true }) {
   const payload = row.payload || row;
   const text = sourceText(payload);
   const url = sourceUrl(payload);
   const times = sourceTimes(payload, row);
+  const recordId = rawRecordId(row);
   return <article className="trace-record source-record">
     <div className="trace-record-heading"><strong>{label || `Original #${row.record_id ?? row.id ?? "?"}`}</strong><span className="trace-pill">{payload.source || row.source || "Source not recorded"}</span></div>
     {payload.data?.title && <h4>{payload.data.title}</h4>}
+    {row.display_limited && <p className="trace-warning">Displayed fields are a bounded projection. The SHA256 covers the complete stored original, not only this displayed excerpt.</p>}
     <p className="source-excerpt">{text ? readable(text) : "Readable source text is unavailable in this record. Inspect the recorded source fields below."}</p>
     {url && <a className="source-link" href={url} target="_blank" rel="noreferrer">Open original source ↗</a>}
     <Metadata values={[
@@ -48,6 +51,7 @@ export function SourceRecord({ row, label }) {
       ["Integrity status", humanize(row.hash_status || row.status || payload.verification_status)],
     ]} />
     <Disclosure className="trace-raw" label="Inspect recorded source fields"><pre>{JSON.stringify(payload.raw ?? payload, null, 2)}</pre></Disclosure>
+    {allowContext && recordId && payload.source === "twitter" && <RecordedConversation recordId={recordId} renderRecord={(record) => <SourceRecord row={record} allowContext={false} />} />}
   </article>;
 }
 
@@ -226,6 +230,42 @@ function CycleActivity({ data, error }) {
   </details>;
 }
 
+function OriginalInspector() {
+  const [input, setInput] = useState("");
+  const [request, setRequest] = useState(null);
+  const [record, setRecord] = useState(null);
+  const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const inputId = useId();
+
+  useEffect(() => {
+    if (!request) return;
+    const controller = new AbortController();
+    setRecord(null); setError(null); setLoading(true);
+    getJson(`/api/traces/raw/${request.id}`, controller.signal).then((result) => {
+      const original = graphNodes(result.graph || result, "raw").find((node) => rawRecordId(node) === request.id);
+      if (!original) throw new Error("The requested original was not returned");
+      setRecord(original);
+    }).catch((problem) => { if (problem.name !== "AbortError") setError(problem.message); })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    return () => controller.abort();
+  }, [request]);
+
+  function inspect(event) {
+    event.preventDefault();
+    const id = /^\d+$/.test(input.trim()) ? Number(input.trim()) : NaN;
+    if (!Number.isSafeInteger(id) || id <= 0) { setError("Enter a positive original record ID."); return; }
+    setRequest({ id });
+  }
+
+  return <div className="original-inspector"><form onSubmit={inspect}>
+    <label htmlFor={inputId}>Original record ID</label><div className="original-inspector-controls"><input id={inputId} type="number" inputMode="numeric" min="1" max={Number.MAX_SAFE_INTEGER} step="1" value={input} onChange={(event) => setInput(event.target.value)} placeholder="Enter a stored record ID" required /><button className="refresh-button" type="submit" disabled={loading}>{loading ? "Loading…" : "Inspect original"}</button></div>
+  </form><p className="muted">Open any locally stored source, including messages outside the latest routing events.</p>
+    {error && <p className="trace-error" role="status">Original lookup unavailable: {error}</p>}
+    {record && <SourceRecord key={rawRecordId(record)} row={record} />}
+  </div>;
+}
+
 function RoutingActivity({ refresh }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
@@ -267,6 +307,7 @@ function RoutingActivity({ refresh }) {
 
   return <section className="routing-activity" aria-labelledby="routing-title">
     <div className="section-heading"><div><span className="eyebrow">Attention includes saying no</span><h3 id="routing-title">Recent routing outcomes</h3><p>Inspect accepted and filtered messages, including those that never became a thesis.</p></div><span className="trace-pill">Latest 20 events</span></div>
+    <Disclosure label="Inspect an original by record ID" className="original-inspector-disclosure"><OriginalInspector /></Disclosure>
     {error && <p className="trace-error" role="status">Routing activity unavailable: {error}. {data ? "Showing the last received snapshot." : "Use Refresh to retry."}</p>}
     {!displayGroups.length ? <p className="trace-empty">{data ? "No persisted routing events yet. Historical verdicts are not reconstructed." : error ? "Routing records could not be loaded." : "Loading routing events…"}</p> : <div className="routing-workspace">
       <div className="routing-list" aria-label="Messages with recorded routing outcomes">{displayGroups.map((group) => <button key={group.key} className={`routing-item ${identity === group.key ? "selected" : ""}`} onClick={() => { setSelectedKey(group.key); setSelectedSnapshot(group); }} aria-pressed={identity === group.key}>

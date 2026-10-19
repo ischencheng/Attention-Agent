@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { evidenceLabel, lastRevision, recordKey, researchTitle, routingDisposition, routingGroups, safeSourceUrl, sourceText, sourceTimes, traceStages } from "./traceModel.js";
+import { evidenceLabel, lastRevision, rawRecordId, recordKey, researchTitle, routingDisposition, routingGroups, safeSourceUrl, sourceText, sourceTimes, traceStages } from "./traceModel.js";
 
 test("missing routing telemetry cannot imply rejection", () => {
   assert.equal(routingDisposition({}), "Not recorded");
@@ -54,4 +54,14 @@ test("routing groups join identical source revisions but not edited originals", 
   assert.equal(grouped.length, 2);
   assert.equal(grouped[0].events.length, 2);
   assert.equal(grouped[1].events.length, 1);
+});
+
+test("conversation requests use only authoritative positive raw record IDs", () => {
+  assert.equal(rawRecordId({ record_id: 3, id: "raw:3" }), 3);
+  assert.equal(rawRecordId({ id: 12 }), 12);
+  assert.equal(rawRecordId({ id: "raw:12" }), 12);
+  assert.equal(rawRecordId({ id: "ticket:12" }), null);
+  assert.equal(rawRecordId({ id: "twitter-2111978951438647414" }), null);
+  assert.equal(rawRecordId({ id: -1 }), null);
+  assert.equal(rawRecordId({ id: true }), null);
 });

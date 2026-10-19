@@ -358,6 +358,36 @@ a { color: #7dd3fc; }
 .routing-chain > div { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; font-size: 11px; color: #a8cbe5; }
 .routing-event-detail > summary, .routing-original > summary { cursor: pointer; font-size: 12px; color: #9ebbd8; padding: 14px 0 0; }
 .routing-original { border-top: 1px solid #293b52; margin-top: 17px; }
+.original-inspector-disclosure { border: 1px solid #2c425b; border-radius: 7px; padding: 11px 14px; background: #101d2d; margin-bottom: 15px; }
+.original-inspector { padding: 13px 0 0; }
+.original-inspector label { display: block; font-size: 11px; color: #98b0c8; margin-bottom: 8px; }
+.original-inspector-controls { display: flex; gap: 10px; }
+.original-inspector input { min-width: 0; flex: 1; max-width: 330px; border: 1px solid #425e7a; border-radius: 5px; background: #14253a; color: #c4dcef; padding: 9px 11px; font: inherit; font-size: 12px; }
+.original-inspector > .muted { font-size: 11px; line-height: 1.7; }
+.recorded-conversation { margin-top: 16px; border-top: 1px solid #31475f; padding-top: 13px; }
+.conversation-toggle { background: #172e43; border: 1px solid #426884; border-radius: 6px; padding: 9px 12px; color: #b8dbef; font-size: 12px; cursor: pointer; text-align: left; }
+.conversation-toggle:hover { background: #203c54; border-color: #74a0be; }
+.conversation-panel { margin-top: 15px; padding: 17px; background: #0d1828; border: 1px solid #2f445f; border-radius: 8px; }
+.conversation-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; font-size: 13px; color: #c7dded; }
+.conversation-boundary { border-left: 2px solid #807da9; padding-left: 12px; color: #b8b1d1 !important; font-size: 11px !important; line-height: 1.8 !important; margin: 14px 0 !important; }
+.conversation-capture { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 10px; color: #7c98b4; margin: 15px 0; }
+.inline-retry { font-size: 11px; padding: 0; border: 0; background: transparent; color: #9dcee9; text-decoration: underline; cursor: pointer; }
+.inline-retry:disabled { color: #667f97; cursor: wait; }
+.conversation-coverage { display: flex; flex-wrap: wrap; gap: 9px 17px; font-size: 11px; color: #a8bfd5; border-top: 1px solid #253b53; border-bottom: 1px solid #253b53; padding: 12px 0; margin: 16px 0; }
+.conversation-links ul { padding: 0; list-style: none; margin: 12px 0; }
+.conversation-links li { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; padding: 8px 0; font-size: 11px; color: #7f9bb8; }
+.conversation-links a, .conversation-missing a { font-size: 11px; text-decoration: none; }
+.conversation-links a:hover, .conversation-missing a:hover { text-decoration: underline; }
+.conversation-missing { border-left: 2px solid #8a704d; padding: 0 0 0 14px; margin: 22px 0; }
+.conversation-missing ul { list-style: none; padding: 0; font-size: 11px; color: #b7c5d6; }
+.conversation-missing li { padding: 7px 0; overflow-wrap: anywhere; }
+.conversation-missing p { color: #bca482; font-size: 11px; margin: 5px 0; }
+.conversation-record { margin: 24px 0 10px; scroll-margin-top: 18px; }
+.conversation-record-label { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; font-size: 11px; color: #91b8d1; }
+.conversation-record-label .muted { font-size: 10px; }
+.conversation-record .trace-record { padding: 14px; margin-top: 9px; }
+.conversation-warnings { margin-top: 18px; border-top: 1px solid #283c54; padding-top: 3px; }
+.conversation-warnings ul { padding-left: 17px; color: #8ca6bd; font-size: 11px; line-height: 1.8; }
 .feed-section { margin-top: 40px; }
 
 @media (max-width: 1150px) {
@@ -388,6 +418,8 @@ a { color: #7dd3fc; }
   .routing-workspace { grid-template-columns: 1fr; }
   .routing-list { border-right: 0; border-bottom: 1px solid #26364f; max-height: 230px; }
   .routing-detail { padding: 18px 14px; }
+  .conversation-panel { padding: 13px 10px; }
+  .conversation-record .trace-record { padding: 11px; }
   .trace-sidebar { border-right: 0; border-bottom: 1px solid #26364f; padding: 12px 14px; }
   .trace-sidebar-heading { padding: 0 0 9px; font-size: 10px; }
   .trace-sidebar .research-item { display: none; }
