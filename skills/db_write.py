@@ -121,13 +121,15 @@ def prepare_payload(topic: str, payload: dict) -> dict:
 
 def produce_message(topic: str, payload: dict) -> dict:
     if topic not in ALLOWED_TOPICS:
-        return {"error": f"Topic '{topic}' not allowed. Use: {sorted(ALLOWED_TOPICS)}"}
+        raise ValueError(f"Topic '{topic}' not allowed. Use: {sorted(ALLOWED_TOPICS)}")
 
     producer = Producer({
         "bootstrap.servers": KAFKA_BOOTSTRAP,
         "acks": "all",
         "enable.idempotence": True,
         "compression.type": "zstd",
+        "delivery.timeout.ms": 10000,
+        "request.timeout.ms": 5000,
     })
 
     result = {"status": "pending"}
@@ -150,11 +152,12 @@ def produce_message(topic: str, payload: dict) -> dict:
         value=value,
         on_delivery=on_delivery,
     )
-    producer.flush(timeout=10)
+    remaining = producer.flush(timeout=12)
 
     if delivery_error[0]:
-        result["status"] = "error"
-        result["error"] = delivery_error[0]
+        raise RuntimeError(f"Kafka publication failed: {delivery_error[0]}")
+    if remaining or result["status"] != "ok":
+        raise TimeoutError("Kafka did not acknowledge the publication before its delivery deadline")
 
     return result
 
