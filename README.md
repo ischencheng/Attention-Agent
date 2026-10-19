@@ -36,7 +36,14 @@ for authentication, operation and measured limitations. The hosted model itself
 is not claimed to be open source.
 
 `pipeline.py` observes real `decision_packets`, independently verifies provenance,
-and freezes them in `runs/production/`. The earlier `run.py`/`daily.py` RSS pilot
+and freezes them in `runs/production/`. It also versions Strong's saved research
+state independently, including cycles that produce no decision. Research snapshots
+preserve the original reasoning and update/freeze times; they remain unscored and
+do not create market predictions. Reports expose counts and lineage, while the
+complete state stays in the local ledger. Observer polling cannot recover changes
+that were overwritten between polls.
+
+The earlier `run.py`/`daily.py` RSS pilot
 is a separate experiment and is not evidence that the production pipeline ran.
 
 ## Evidence provenance and software engineering evaluation
