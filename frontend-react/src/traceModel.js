@@ -74,13 +74,53 @@ export function graphNodes(graph, kind) {
   return asArray(graph?.nodes).filter((node) => node.kind === kind);
 }
 
+export function isInputRelay(record = {}) {
+  const envelope = record.payload || record;
+  const classifier = envelope.classifier || envelope.classification || envelope;
+  return envelope.stage === "relay" || record.stage === "relay" || classifier.classification_mode === "relay";
+}
+
+export function routingStageLabel(record = {}) {
+  const stage = record.stage || record.payload?.stage;
+  if (isInputRelay(record)) return "Input relay";
+  if (stage === "filter") return "Relevance filter";
+  if (stage === "fast") return "Fast";
+  return readable(stage, "Routing event").replaceAll("_", " ");
+}
+
 export function routingDisposition(payload = {}) {
-  if (payload.outcome === "passed" || payload.outcome === "pass" || payload.outcome === "published") return "Passed";
-  if (payload.outcome === "filtered" || payload.outcome === "rejected" || payload.outcome === "reject") return "Filtered out";
-  if (payload.outcome === "skipped") return "Skipped";
-  if (payload.verdict === true || payload.verdict === "yes" || payload.verdict === "pass") return "Passed";
-  if (payload.verdict === false || payload.verdict === "no" || payload.verdict === "reject") return "Filtered out";
+  const envelope = payload.payload || payload;
+  const outcome = payload.outcome ?? envelope.outcome;
+  const verdict = payload.verdict ?? envelope.verdict;
+  const passed = outcome ? ["passed", "pass", "published"].includes(outcome) : [true, "yes", "pass"].includes(verdict);
+  const rejected = outcome ? ["filtered", "rejected", "reject"].includes(outcome) : [false, "no", "reject"].includes(verdict);
+  if (isInputRelay(payload)) return passed ? "Forwarded" : rejected ? "Not forwarded" : "Not recorded";
+  if (passed) return "Passed";
+  if (rejected) return "Filtered out";
+  if (outcome === "skipped") return "Skipped";
   return "Not recorded";
+}
+
+export function classificationPresentation(classifier = {}, stage = null) {
+  const relay = stage === "relay" || classifier.classification_mode === "relay";
+  const usage = classifier.usage && typeof classifier.usage === "object" && !Array.isArray(classifier.usage) ? classifier.usage : null;
+  if (relay) return { model: "No model call", execution: "Deterministic input relay", usage: null,
+    usageTitle: "No model call", usageNote: "The input relay does not invoke a model." };
+  if (classifier.cached === true) return { model: classifier.model || "Producing model not recorded",
+    execution: "Cached result reused · no model call for this request", usage,
+    usageTitle: "Historical cached-result usage",
+    usageNote: "These token counts belong to the stored result's original computation. They are not new model usage or newly billed usage for this request." };
+  const policy = classifier.classified_by_model === false;
+  return { model: policy ? (classifier.model || "No model call") : (classifier.model || "Model not recorded"),
+    execution: policy ? "Routing policy · no model classification" : classifier.cached === false ? "Gateway response not served from cache" : "Model invocation / cache status not recorded",
+    usage, usageTitle: "Reported model usage",
+    usageNote: classifier.cached === false ? "Usage reported for this recorded computation. Billing is not measured in this view."
+      : "Usage was recorded, but cache reuse was not recorded. It cannot be attributed to a new model call or a new charge." };
+}
+
+export function ticketClassifications(payload = {}) {
+  return [["Relevance filter", payload.local_ml_filter], ["Fast", payload.fast_agent]]
+    .filter(([, result]) => result && typeof result === "object" && !Array.isArray(result));
 }
 
 export function evidenceLabel(status) {
@@ -110,7 +150,7 @@ export function traceStages(graph, kind, evidence) {
     .map((type) => [type, graphNodes(graph, type).length]));
   return [
     { id: "originals", label: "Originals", count: counts.raw, detail: counts.raw ? "Source records" : "No linked originals" },
-    { id: "routing", label: "Routing", count: counts.routing, detail: counts.routing ? "Recorded verdicts" : "Telemetry not recorded" },
+    { id: "routing", label: "Routing", count: counts.routing, detail: counts.routing ? "Recorded handling" : "Telemetry not recorded" },
     { id: "tickets", label: "Fast", count: counts.ticket, detail: counts.ticket ? "Attention tickets" : "No linked tickets" },
     { id: "mid", label: "Mid", count: counts.annotation, detail: counts.annotation ? "Evidence annotations" : "No linked annotations" },
     { id: "strong", label: "Strong", count: counts.research + counts.decision,
