@@ -262,7 +262,7 @@ export default function App() {
   const sources = overview.sources || {};
   const sourceEntries = Object.entries(sources);
   const agents = Array.isArray(overview.agents) ? overview.agents : [];
-  const stages = [["raw", "raw_count"], ["filtered", "clean_count"], ["embedded", "embedding_count"],
+  const stages = [["raw", "raw_count"], ["clean deliveries", "clean_count"], ["embedded", "embedding_count"],
     ["tickets", "ticket_count"], ["annotations", "annotation_count"], ["decisions", "decision_count"]];
 
   return (
