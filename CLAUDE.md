@@ -49,6 +49,44 @@ docker compose exec -T postgres psql -U bluesky -d bluesky -c "SELECT * FROM <ta
 
 Core tables: `raw_messages`, `source_clean`, `vector_embeddings`, `attention_tickets`, `annotations`, `decision_packets`
 
+### Historical Evidence and the Coding Environment
+
+New decisions published through `skills/db_write.py` require valid annotation
+and ticket references. The write skill generates `evidence_snapshot` in one
+consistent database transaction; callers must not supply it. The snapshot
+preserves the annotation at publication and identifies authoritative originals
+by source, source ID, and content digest. Later annotation corrections do not
+change that history.
+
+`GET /api/decisions/{decision_id}/evidence` returns `verified`, `broken`, or
+`legacy_unverified`. Legacy decisions are not retrospectively assigned evidence.
+Verification checks provenance integrity, not investment merit or whether a
+model understood the source material.
+
+Apply the additive migration to an existing database before relying on raw
+immutability (init scripts run automatically only for fresh data volumes):
+
+```bash
+docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U bluesky -d bluesky \
+  < postgres/init/002_evidence.sql
+docker compose up -d --build backend-fastapi
+```
+
+The API image includes `skills/evidence.py` at `/app/evidence.py`. Its Docker
+build context is the repository root; for a standalone build, use
+`docker build -f backend-fastapi/Dockerfile .` from that root.
+The migration blocks ordinary UPDATE/DELETE of raw originals and changes to
+published decision snapshots/references; it does not constrain a DB superuser.
+
+The runnable repository-level coding task is documented in
+[`environments/attention_provenance/README.md`](environments/attention_provenance/README.md),
+with its full behavioral contract in
+[`TASK.md`](environments/attention_provenance/TASK.md).
+Use its exported unsolved baseline for an agent attempt: the current checkout
+contains the reference repair. Its grader uses real PostgreSQL and FastAPI with
+captured Kafka publication, and makes no claim about live broker delivery,
+LLM quality, or trading returns.
+
 ## Service Endpoints
 
 | Service     | URL                       |

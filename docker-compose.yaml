@@ -639,8 +639,8 @@ services:
 
   backend-fastapi:
     build:
-      context: ./backend-fastapi
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: backend-fastapi/Dockerfile
     container_name: backend-fastapi
     hostname: backend-fastapi
     networks: [backend]
