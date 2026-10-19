@@ -207,7 +207,8 @@ class Gateway:
                 raise RuntimeError("Classification request budget expired in the queue")
             result = self.runner(self.classification_prompt(request), CLASSIFY_SCHEMA, self.workspace, artifact,
                                  min(self.timeout, remaining), self.model, codex_bin=self.codex_bin, sandbox="read-only",
-                                 network_access=False, disable_tools=True, model_instructions=CLASSIFIER_INSTRUCTIONS)
+                                 network_access=False, disable_tools=True, model_instructions=CLASSIFIER_INSTRUCTIONS,
+                                 environment_profile="model")
             final = result.get("final")
             if not isinstance(final, dict) or type(final.get("verdict")) is not bool or not isinstance(final.get("reason"), str):
                 raise RuntimeError("Classifier returned an invalid structured decision")

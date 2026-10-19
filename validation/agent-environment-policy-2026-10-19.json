@@ -1,0 +1,121 @@
+{
+  "observed_at": "2026-10-19T06:39:34.302092+00:00",
+  "issue": "https://github.com/ischencheng/Attention-Agent/issues/15",
+  "scope": "Explicit environment inheritance only; resource isolation is tracked in issue 16.",
+  "tests": {
+    "runner_and_triggers": 24,
+    "gateway_and_scheduler": 32
+  },
+  "fast": {
+    "artifact": "environments/attention_judgment/runs/local-pipeline/codex-runs/fast-20261019T063447Z-a6f883f5b9",
+    "model": "gpt-6-luna",
+    "success": true,
+    "environment_profile": "model",
+    "environment_names": [
+      "HOME",
+      "LC_CTYPE",
+      "LOGNAME",
+      "PATH",
+      "PYTHONUNBUFFERED",
+      "SHELL",
+      "TMPDIR",
+      "USER"
+    ],
+    "excluded_application_variables_absent": true,
+    "disabled_tools": true,
+    "routing_id": 1372,
+    "source_id": "twitter-2112012722514841605",
+    "raw_sha256": "c620a3a038083f97bd8db090f6e2901402e9feb255f9e73dfe0d9b0363e77132",
+    "input": {
+      "topic": "fastagent_input",
+      "partition": 0,
+      "offset": 638
+    },
+    "cache_key": "6637c7671da563b2a2937518141ac2502195c2652d64cfd74ad6ab1b7afb2840",
+    "usage": {
+      "input_tokens": 2751,
+      "cached_input_tokens": 2560,
+      "cache_write_input_tokens": 0,
+      "output_tokens": 38,
+      "reasoning_output_tokens": 0
+    }
+  },
+  "remaining_storage_boundary": {
+    "role": "bluesky",
+    "superuser": true,
+    "create_role": true,
+    "create_database": true,
+    "bypass_rls": true
+  },
+  "no_environment_values_recorded": true,
+  "mid": {
+    "cycle_id": "20261019T063424808256Z-mid-2f9adc90",
+    "artifact": "environments/attention_judgment/runs/local-pipeline/cycles/mid-1792391664-1b9d64dc",
+    "model": "gpt-6-luna",
+    "environment_profile": "research",
+    "environment_names": [
+      "ATTENTION_GATEWAY_TOKEN",
+      "DB_HOST",
+      "DB_NAME",
+      "DB_PASSWORD",
+      "DB_PORT",
+      "DB_USER",
+      "EMBEDDING_GATEWAY_URL",
+      "EMBEDDING_MODEL",
+      "EMBEDDING_PROVIDER",
+      "HOME",
+      "KAFKA_BOOTSTRAP",
+      "LC_CTYPE",
+      "LOGNAME",
+      "PATH",
+      "PYTHONUNBUFFERED",
+      "SEC_EDGAR_USER_AGENT",
+      "SHELL",
+      "TMPDIR",
+      "USER"
+    ],
+    "success": true,
+    "completed_at": "2026-10-19T06:37:40.101017+00:00",
+    "state_verified": true,
+    "reviewed_input_ids": [
+      95,
+      96,
+      97,
+      98,
+      99,
+      100,
+      101,
+      102,
+      103,
+      104,
+      105,
+      106,
+      107,
+      108,
+      109,
+      110,
+      111,
+      112,
+      113,
+      114
+    ],
+    "published_count": 0,
+    "summary": "Read and verified originals for tickets 95\u2013114, grouped related posts by causal event, and saved pending themes. No theme met the publication threshold; no annotations were published.",
+    "recovered_failed_tool_commands": 3,
+    "usage": {
+      "input_tokens": 985113,
+      "cached_input_tokens": 910464,
+      "cache_write_input_tokens": 0,
+      "output_tokens": 16359,
+      "reasoning_output_tokens": 2297
+    },
+    "wall_seconds": 195.246
+  },
+  "limitations": [
+    "Environment-name filtering does not enforce host, network, database, Kafka, or evaluator isolation.",
+    "Child-process sentinel denial tests use a fake CLI; production checks verify actual model execution and durable research state.",
+    "Mid recovered from shell/JSON construction errors before completing; no claim that every tool command succeeded.",
+    "Strong uses the same explicit research profile, covered by tests; no new Strong model cycle is claimed.",
+    "No exploit demonstration or unauthorized production mutation was performed."
+  ]
+}
