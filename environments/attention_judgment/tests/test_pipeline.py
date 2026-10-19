@@ -5,10 +5,12 @@ No running agent, live feed, or Kafka broker is implied by these tests.
 from __future__ import annotations
 
 import copy
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 import sys
 import tempfile
+import threading
 import unittest
 from unittest.mock import patch
 
@@ -445,6 +447,89 @@ class TargetTests(unittest.TestCase):
 
 
 class PostgresBridgeTests(unittest.TestCase):
+    def test_concurrent_observers_lock_before_snapshot_even_when_content_reverts(self):
+        import pgserver
+        import psycopg2
+        from psycopg2.extras import Json
+
+        with tempfile.TemporaryDirectory(prefix="attention-observer-order-test-") as directory:
+            server = pgserver.get_server(Path(directory) / "postgres", cleanup_mode="stop")
+            ledger_path = Path(directory) / "production.sqlite3"
+            ledger = Ledger(ledger_path)
+            original = {"theses": {"capacity": {"status": "research_only"}}}
+            changed = {"theses": {"capacity": {"status": "invalidated"}}}
+            older_ready = threading.Event()
+            release_older = threading.Event()
+            newer_attempting = threading.Event()
+            newer_snapshot = threading.Event()
+            freeze = pipeline.freeze_research_state
+
+            def pause_older(observer_ledger, row, **kwargs):
+                if row["state"] == changed:
+                    older_ready.set()
+                    if not release_older.wait(10):
+                        raise RuntimeError("older observer was not released")
+                return freeze(observer_ledger, row, **kwargs)
+
+            def observe(role):
+                class ObservedCursor(psycopg2.extensions.cursor):
+                    def execute(self, sql, *args, **kwargs):
+                        result = super().execute(sql, *args, **kwargs)
+                        if role == "newer" and sql.startswith("SELECT id, payload, kafka_topic"):
+                            newer_snapshot.set()
+                        return result
+
+                observer_ledger = Ledger(ledger_path)
+                conn = psycopg2.connect(server.get_uri(), cursor_factory=ObservedCursor)
+                try:
+                    if role == "newer":
+                        newer_attempting.set()
+                    return pipeline.sync(conn, observer_ledger)
+                finally:
+                    conn.close()
+                    observer_ledger.close()
+
+            def update(state, updated_at):
+                with psycopg2.connect(server.get_uri()) as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("UPDATE agent_state SET state=%s,updated_at=%s WHERE agent_id='claude-strong'",
+                                    (Json(state), timestamp(updated_at)))
+
+            try:
+                with psycopg2.connect(server.get_uri()) as setup:
+                    with setup.cursor() as cur:
+                        cur.execute((pipeline.ROOT / "postgres/init/001_schema.sql").read_text())
+                        cur.execute("INSERT INTO agent_state(agent_id,state,updated_at) VALUES(%s,%s,%s)",
+                                    ("claude-strong", Json(original), INSERTED))
+                observe("initial")
+                update(changed, "2025-06-03T17:00:00Z")
+                with patch.object(pipeline, "freeze_research_state", side_effect=pause_older), \
+                        ThreadPoolExecutor(max_workers=2) as executor:
+                    older = executor.submit(observe, "older")
+                    try:
+                        self.assertTrue(older_ready.wait(5), "older observer did not read its snapshot")
+                        # A later A observation would deduplicate against the
+                        # initial A if it could overtake the paused B observer.
+                        update(original, "2025-06-04T17:00:00Z")
+                        newer = executor.submit(observe, "newer")
+                        self.assertTrue(newer_attempting.wait(5), "newer observer did not attempt sync")
+                        self.assertFalse(newer_snapshot.wait(0.25),
+                                         "newer observer acquired a snapshot before the older sync completed")
+                    finally:
+                        release_older.set()
+                    self.assertEqual(older.result(timeout=5)["research_rejected"], [])
+                    self.assertEqual(newer.result(timeout=5)["research_rejected"], [])
+                self.assertTrue(newer_snapshot.is_set())
+                entries = ledger.entries(pipeline.RESEARCH_KIND)
+                self.assertEqual([e["payload"]["state"] for e in entries], [original, changed, original])
+                self.assertEqual([e["payload"]["version"] for e in entries], [1, 2, 3])
+                self.assertEqual(pipeline.report(ledger)["latest_research_states"][0]["updated_at"],
+                                 "2025-06-04T17:00:00+00:00")
+            finally:
+                release_older.set()
+                ledger.close()
+                server.cleanup()
+
     def test_real_database_snapshot_and_restart_safe_versioning(self):
         import pgserver
         import psycopg2

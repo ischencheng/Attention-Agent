@@ -25,6 +25,7 @@ from __future__ import annotations
 import argparse
 import copy
 from datetime import datetime, timezone
+import fcntl
 import json
 import math
 import os
@@ -279,7 +280,21 @@ def sync(conn, ledger, *, source_id="attention-agent"):
 
     The caller owns connection lifetime. No DB writes or Kafka publishing occur.
     A failed evidence graph is reported separately and never enters evaluation.
+    Serialize observers before PostgreSQL takes a snapshot, including unchanged
+    content observations. Per-record append locks alone allow an older snapshot
+    to finish after a newer one and make stale content look like a reversion.
+    Like the local supervisor, this observer runs on POSIX (macOS/Linux).
     """
+    lock_path = ledger.path.with_name(ledger.path.name + ".sync.lock")
+    with lock_path.open("a") as stream:
+        fcntl.flock(stream, fcntl.LOCK_EX)
+        try:
+            return _sync_locked(conn, ledger, source_id=source_id)
+        finally:
+            fcntl.flock(stream, fcntl.LOCK_UN)
+
+
+def _sync_locked(conn, ledger, *, source_id):
     conn.set_session(isolation_level="REPEATABLE READ", readonly=True)
     results, rejected = [], []
     research_results, research_rejected = [], []
