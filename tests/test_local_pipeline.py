@@ -132,6 +132,10 @@ class SchedulerTests(unittest.TestCase):
         success = supervisor.cycle("mid")
         self.assertEqual(success["selected_input_ids"], list(range(21, 41)))
         self.assertNotIn("error", self.status())
+        events = [json.loads(path.read_text()) for path in (self.runtime / "cycle-audit").glob("*/*.json")]
+        self.assertEqual(sum(event["event"] == "failed" for event in events), 1)
+        self.assertEqual(sum(event["event"] == "completed" for event in events), 2)
+        self.assertEqual(len({event["cycle_id"] for event in events}), 3)
 
     def test_model_report_without_actual_state_save_cannot_advance(self):
         with patch.object(supervisor, "connect", return_value=StateConnection(saved=False)):

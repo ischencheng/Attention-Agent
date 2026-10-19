@@ -23,7 +23,10 @@ import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "agent"))
+sys.path.insert(0, str(ROOT / "scripts"))
 from codex_runner import CYCLE_SCHEMA, cycle_prompt, run
+from cycle_audit import safe_text, terminal_summary, tool_events, write_event
+from trace_projection import publish_projection
 import psycopg2
 from dotenv import load_dotenv
 
@@ -99,9 +102,19 @@ def cycle(role, *, force=False):
     with lock(role):
         status_path = RUNTIME / f"{role}.json"
         previous = json.loads(status_path.read_text()) if status_path.exists() else {}
+        attempt = {"cycle_id": f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')}-{role}-{uuid.uuid4().hex[:8]}",
+                   "started_at": now(), "role": role}
         try:
-            return _cycle_locked(role, force, previous, status_path)
+            result = _cycle_locked(role, force, previous, status_path, attempt)
+            if result["status"] != "waiting_for_new_evidence":
+                write_event(RUNTIME / "cycle-audit", attempt["cycle_id"], "completed", terminal_summary(result))
+            return result
         except Exception as exc:
+            write_event(RUNTIME / "cycle-audit", attempt["cycle_id"], "failed",
+                        {"role": role, "status": "failed", "failed_at": now(),
+                         "started_at": attempt["started_at"],
+                         "error_type": type(exc).__name__, "summary": safe_text(exc),
+                         **tool_events(attempt.get("output_dir"))})
             # Preserve the last successful acknowledgments; a failed attempt
             # must remain visible and retry the same pending versions.
             save(status_path, {**previous, "role": role, "status": "failed",
@@ -109,7 +122,7 @@ def cycle(role, *, force=False):
             raise
 
 
-def _cycle_locked(role, force, previous, status_path):
+def _cycle_locked(role, force, previous, status_path, attempt):
     versions = signature(role)
     processed = dict(previous.get("processed_versions", {}))
     pending = sorted((int(key) for key, value in versions.items()
@@ -129,6 +142,13 @@ def _cycle_locked(role, force, previous, status_path):
     state_id = os.environ.get(f"{role.upper()}_AGENT_ID", f"claude-{role}")
     prompt = cycle_prompt(role, state_id).replace("/app/AGENTS.md", str(workspace / "AGENTS.md"))
     table = "attention_tickets" if role == "mid" else "annotations"
+    write_event(RUNTIME / "cycle-audit", attempt["cycle_id"], "started",
+                {"role": role, "status": "running", "started_at": attempt["started_at"],
+                 "input_table": table, "selected_input_ids": selected,
+                 "selected_input_versions": {str(key): versions[str(key)] for key in selected},
+                 "version_encoding": "MD5 of PostgreSQL payload::text for scheduler acknowledgment",
+                 "daily_review": daily_review, "forced": force,
+                 "model": os.environ.get("CODEX_MODEL") or "gpt-6.1-sol"})
     review_field = "reviewed_ticket_ids" if role == "mid" else "reviewed_annotation_ids"
     prompt += (f"\nUse {PYTHON} for every Python skill. Current UTC time is {now()}. "
                f"The scheduler selected these oldest pending {table} IDs: {json.dumps(selected)}. "
@@ -145,6 +165,7 @@ def _cycle_locked(role, force, previous, status_path):
                "from today's ingestion date. A price observation is not a forecast. Register numeric "
                "probabilities only if your evidence supports one.")
     output = RUNTIME / "cycles" / f"{role}-{int(time.time())}-{uuid.uuid4().hex[:8]}"
+    attempt["output_dir"] = output
     started = datetime.now(timezone.utc)
     result = run(prompt, CYCLE_SCHEMA, workspace, output,
                  float(os.environ.get("CODEX_TIMEOUT_SECONDS", "900")),
@@ -166,7 +187,7 @@ def _cycle_locked(role, force, previous, status_path):
     for row_id in reviewed:
         processed[str(row_id)] = versions[str(row_id)]
     completed = time.time()
-    record = {"role": role, "status": final["status"], "processed_versions": processed,
+    record = {"cycle_id": attempt["cycle_id"], "role": role, "status": final["status"], "processed_versions": processed,
               "completed_at": now(), "completed_epoch": completed,
               "last_review_epoch": completed if role == "strong" and (daily_review or not last_review) else last_review,
               "selected_input_ids": selected, "pending_count": len(pending) - len(reviewed),
@@ -186,7 +207,10 @@ def bridge():
                        "stdout": result.stdout[-12000:], "stderr": result.stderr[-2000:]})
         if result.returncode:
             raise RuntimeError(f"Production {action} failed: {result.stderr[-1000:]}")
-    save(RUNTIME / "evaluation.json", {"updated_at": now(), "results": output})
+    production = ROOT / "environments/attention_judgment/runs/production"
+    projection = publish_projection(production / "ledger.sqlite3", production / "trace-projection.sqlite3")
+    save(RUNTIME / "evaluation.json", {"updated_at": now(), "results": output,
+                                      "archive_projection": projection})
 
 
 def daemon():
