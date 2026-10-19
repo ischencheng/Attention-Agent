@@ -20,13 +20,6 @@ groups:
             clamp_min(sum(rate(strong_agent_requests_total[5m])), 0.000001),
             1
           )
-      - record: pipeline_trace_completeness_ratio:5m
-        expr: |
-          clamp_max(
-            sum(rate(decision_packet_out_total{status="success"}[5m])) /
-            clamp_min(sum(rate(bluesky_ingestor_raw_publish_success_total[5m])), 0.000001),
-            1
-          )
       - record: local_ml_filter_pass_ratio:5m
         expr: |
           clamp_max(
@@ -48,15 +41,6 @@ groups:
         annotations:
           summary: "Pipeline P95 latency is high"
           description: "P95 end-to-end latency has been above 15 seconds for 10 minutes."
-
-      - alert: PipelineTraceCompletenessLow
-        expr: pipeline_trace_completeness_ratio:5m < 0.7
-        for: 10m
-        labels:
-          severity: warning
-        annotations:
-          summary: "Pipeline trace completeness is low"
-          description: "Final output compared to ingest success is below expected baseline."
 
       - alert: StrongAgentErrorRateHigh
         expr: pipeline_e2e_error_ratio:5m > 0.05

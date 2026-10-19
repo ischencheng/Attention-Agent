@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { auditTraceLink, observabilityLabel } from "./traceModel.js";
 import { classificationPresentation, evidenceLabel, isInputRelay, lastRevision, rawRecordId, recordKey, researchTitle, routingDisposition, routingGroups, routingStageLabel, safeSourceUrl, sourceText, sourceTimes, ticketClassifications, traceStages } from "./traceModel.js";
 
 test("missing routing telemetry cannot imply rejection", () => {
@@ -9,6 +10,26 @@ test("missing routing telemetry cannot imply rejection", () => {
   const stages = traceStages({ nodes: [{ kind: "raw" }] }, "research");
   assert.equal(stages[1].detail, "Telemetry not recorded");
   assert.equal(stages[5].detail, "Unscored research");
+});
+
+test("audit links require an acknowledged identity and matching safe URL", () => {
+  const id = "a".repeat(32);
+  const record = { audit_trace_id: id, audit_trace_url: `http://localhost:16686/trace/${id}`, audit_trace_status: "export_acknowledged" };
+  assert.equal(auditTraceLink(record), record.audit_trace_url);
+  assert.equal(auditTraceLink({ runtime_trace_id: id }), null);
+  assert.equal(auditTraceLink({ ...record, audit_trace_status: "propagated_header_only" }), null);
+  assert.equal(auditTraceLink({ ...record, audit_trace_url: `http://localhost:16686/trace/${"b".repeat(32)}` }), null);
+  assert.equal(auditTraceLink({ ...record, audit_trace_url: `https://user:password@example.org/trace/${id}` }), null);
+  assert.equal(auditTraceLink({ ...record, audit_trace_url: `javascript:alert(1)` }), null);
+  assert.equal(auditTraceLink({ ...record, audit_trace_url: record.audit_trace_url + "?token=secret" }), null);
+});
+
+test("observability labels distinguish blocked, stale and unavailable status", () => {
+  assert.equal(observabilityLabel("blocked"), "Export blocked");
+  assert.equal(observabilityLabel("stale"), "Status stale");
+  assert.equal(observabilityLabel("unavailable"), "Unavailable");
+  assert.equal(observabilityLabel("healthy"), "Exporter healthy");
+  assert.equal(observabilityLabel("arbitrary error text"), "Unknown");
 });
 
 test("provenance verification does not become investment performance", () => {

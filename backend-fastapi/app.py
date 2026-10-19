@@ -22,7 +22,7 @@ from starlette.responses import Response
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.append(str(Path(__file__).resolve().parent.parent / "skills"))
 from evidence import verify_evidence
-from trace_api import clean, cycle_list, research_detail, research_list, routing_list, trace_detail
+from trace_api import clean, cycle_list, observability_status, research_detail, research_list, routing_list, trace_detail
 from source_context import source_context
 
 
@@ -416,6 +416,11 @@ async def api_trace(kind: str, record_id: int) -> Any:
 @app.get("/api/cycles")
 async def api_cycles(limit: int = Query(default=30, ge=1, le=100)) -> dict[str, Any]:
     return await db_call(cycle_list, limit)
+
+
+@app.get("/api/observability")
+async def api_observability() -> dict[str, Any]:
+    return await db_call(observability_status)
 
 
 @app.get("/api/routing")

@@ -678,6 +678,9 @@ services:
       ATTENTION_PRODUCTION_LEDGER: /runtime/production/trace-projection.sqlite3
       ATTENTION_CYCLE_AUDIT_DIR: /runtime/cycle-audit
       ATTENTION_LEGACY_CYCLE_DIR: /runtime/legacy-cycles
+      ATTENTION_OBSERVABILITY_DIR: /runtime/observability
+      ATTENTION_JAEGER_QUERY_URL: http://jaeger:16686
+      ATTENTION_JAEGER_PUBLIC_URL: http://localhost:16686
       LOG_LEVEL: INFO
       OTEL_SERVICE_NAME: backend-fastapi
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
@@ -687,6 +690,7 @@ services:
       - ./environments/attention_judgment/runs/production:/runtime/production:ro
       - ./environments/attention_judgment/runs/local-pipeline/cycle-audit:/runtime/cycle-audit:ro
       - ./environments/attention_judgment/runs/local-pipeline/legacy-cycle-summaries:/runtime/legacy-cycles:ro
+      - ./environments/attention_judgment/runs/local-pipeline/observability:/runtime/observability:ro
     restart: unless-stopped
     depends_on:
       postgres:
@@ -696,11 +700,30 @@ services:
       otel-collector:
         condition: service_started
 
+  jaeger-storage-init:
+    image: python:3.12-slim
+    user: "0:0"
+    network_mode: none
+    command:
+      - python
+      - -c
+      - "import os; os.makedirs('/badger/data', exist_ok=True); os.chown('/badger/data', 10001, 10001)"
+    volumes:
+      - jaeger-data:/badger
+    restart: "no"
+
   jaeger:
     image: jaegertracing/jaeger:2.5.0
     container_name: jaeger
     hostname: jaeger
     networks: [backend]
+    command: ["--config=/etc/jaeger/config.yaml"]
+    volumes:
+      - ./observability/jaeger-config.yaml:/etc/jaeger/config.yaml:ro
+      - jaeger-data:/badger
+    depends_on:
+      jaeger-storage-init:
+        condition: service_completed_successfully
     ports:
       - "16686:16686"
       - "4317:4317"
@@ -780,6 +803,7 @@ networks:
   backend: {}
 
 volumes:
+  jaeger-data:
   mid-codex-home:
   strong-codex-home:
   mid-agent-runs:

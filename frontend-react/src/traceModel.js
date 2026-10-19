@@ -2,6 +2,20 @@ export function asArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
+export function auditTraceLink(record = {}) {
+  if (record.audit_trace_status !== "export_acknowledged" || !/^[0-9a-f]{32}$/.test(record.audit_trace_id || "")) return null;
+  try {
+    const url = new URL(record.audit_trace_url);
+    return ["https:", "http:"].includes(url.protocol) && !url.username && !url.password && !url.search && !url.hash &&
+      url.pathname.endsWith(`/trace/${record.audit_trace_id}`) ? url.href : null;
+  } catch { return null; }
+}
+
+export function observabilityLabel(status) {
+  return { healthy: "Exporter healthy", degraded: "Degraded", blocked: "Export blocked", stale: "Status stale",
+    unavailable: "Unavailable" }[status] || "Unknown";
+}
+
 export function rawRecordId(row = {}) {
   const id = row.record_id ?? row.id;
   if (Number.isSafeInteger(id) && id > 0) return id;

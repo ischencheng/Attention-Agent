@@ -13,9 +13,13 @@ import os
 from pathlib import Path
 import re
 import sqlite3
+from urllib.error import URLError
+from urllib.parse import urlencode, urlsplit
+from urllib.request import HTTPRedirectHandler, build_opener
 
 from psycopg2.extras import RealDictCursor
 from evidence import digest, verify_evidence
+from runtime_traces import trace_identity
 
 
 MAX_LINKS = 50
@@ -31,6 +35,164 @@ THESIS_KEYS = {"title", "claim", "status", "current_status", "confidence", "revi
                "invalidation_conditions", "expected_horizon", "what_changed"}
 REVISION_KEYS = THESIS_KEYS - {"revisions", "source_identity"} | {
     "timestamp", "revision_id", "prior_revision", "created_at", "rationale", "uncertainty"}
+AUDIT_SERVICES = {"relay.recorded_handling": {"attention-routing"}, "filter.recorded_handling": {"attention-routing"},
+                  "fast.recorded_handling": {"attention-routing"}, "agent.recorded_cycle": {"attention-mid", "attention-strong"}}
+OBSERVABILITY_STALE_SECONDS = 180
+MAX_STATUS_BYTES = 64_000
+
+
+def utc_timestamp(value):
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return parsed.astimezone(timezone.utc) if parsed.tzinfo else None
+    except ValueError:
+        return None
+
+
+def observability_directory():
+    return Path(os.getenv("ATTENTION_OBSERVABILITY_DIR", "/runtime/observability"))
+
+
+def jaeger_base(public=True):
+    name, default = (("ATTENTION_JAEGER_PUBLIC_URL", "http://localhost:16686") if public else
+                     ("ATTENTION_JAEGER_QUERY_URL", "http://jaeger:16686"))
+    value = os.getenv(name, default).rstrip("/")
+    try:
+        url = urlsplit(value)
+        if url.scheme in {"http", "https"} and url.hostname and not (url.username or url.password or url.query or url.fragment):
+            return value
+    except ValueError:
+        pass
+    return None
+
+
+def export_receipts(kind, keys):
+    """Read collector acknowledgments, without assuming current query retention."""
+    if kind not in {"routing", "cycle"}:
+        return {}
+    keys = list(dict.fromkeys(key for key in keys if isinstance(key, str) and
+                             re.fullmatch(r"[A-Za-z0-9_.:-]{1,512}", key)))[:200]
+    path = observability_directory() / "exports.sqlite3"
+    if not keys or not path.is_file():
+        return {}
+    try:
+        with closing(sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=0.2)) as db:
+            db.execute("PRAGMA query_only=ON")
+            found = db.execute("SELECT record_key,trace_id,span_id,exported_at FROM exports WHERE kind=? AND record_key IN ("
+                               + ",".join("?" for _ in keys) + ")", [kind, *keys]).fetchall()
+        base, result = jaeger_base(), {}
+        for key, trace_id, span_id, exported_at in found:
+            expected = trace_identity(kind, key)
+            timestamp = utc_timestamp(exported_at)
+            if (trace_id, span_id) != (expected["trace_id"], expected["span_id"]) or timestamp is None:
+                continue
+            result[key] = {"audit_trace_id": trace_id, "audit_span_id": span_id,
+                           "audit_trace_url": f"{base}/trace/{trace_id}" if base else None,
+                           "audit_exported_at": timestamp.isoformat(), "audit_trace_status": "export_acknowledged",
+                           "audit_trace_origin": "recorded_audit"}
+        return result
+    except (sqlite3.Error, OSError, ValueError, TypeError):
+        return {}
+
+
+class NoQueryRedirect(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def jaeger_services():
+    """A bounded live query check; never expose remote errors or arbitrary names."""
+    result = {"status": "unavailable", "application_services": [], "search_links": []}
+    base = jaeger_base(public=False)
+    if not base:
+        return result
+    try:
+        with build_opener(NoQueryRedirect).open(base + "/api/services", timeout=2) as response:
+            payload = response.read(MAX_STATUS_BYTES + 1)
+        if len(payload) > MAX_STATUS_BYTES:
+            return result
+        value = json.loads(payload)
+        if not isinstance(value, dict) or not isinstance(value.get("data"), list) or not all(isinstance(item, str) for item in value["data"]):
+            return result
+        services = sorted(set(value["data"]) & set().union(*AUDIT_SERVICES.values()))
+        public = jaeger_base()
+        return {"status": "available", "application_services": services,
+                "search_links": [{"service": service, "url": public + "/search?" + urlencode({"service": service, "lookback": "2d"})}
+                                 for service in services] if public else []}
+    except (URLError, OSError, ValueError, TypeError):
+        return result
+
+
+def observability_status(now=None):
+    """Expose only a small status contract, never exporter configuration/logs."""
+    now = now or datetime.now(timezone.utc)
+    exporter = {"status": "unavailable", "reported_status": None, "updated_at": None,
+                "last_success_at": None, "age_seconds": None, "stale": False,
+                "stale_after_seconds": OBSERVABILITY_STALE_SECONDS, "exported_counts": {},
+                "pending_counts": {}, "blocked_counts": {}, "pending_scope": "unknown",
+                "scan_truncated": {}, "error_type": None}
+    recent = []
+    path = observability_directory() / "status.json"
+    try:
+        with path.open("rb") as stream:
+            contents = stream.read(MAX_STATUS_BYTES + 1)
+        if len(contents) > MAX_STATUS_BYTES:
+            raise ValueError("status size limit")
+        value = json.loads(contents)
+        if not isinstance(value, dict) or value.get("status") not in {"healthy", "degraded", "blocked"}:
+            raise ValueError("invalid status")
+        updated = utc_timestamp(value.get("updated_at"))
+        if updated is None or updated > now:
+            raise ValueError("invalid status time")
+        age = (now - updated).total_seconds()
+        exporter.update(status=value["status"], reported_status=value["status"], updated_at=updated.isoformat(),
+                        age_seconds=round(age, 1), stale=age > OBSERVABILITY_STALE_SECONDS)
+        if exporter["stale"] and value["status"] != "blocked":
+            exporter["status"] = "stale"
+        success = utc_timestamp(value.get("last_success_at"))
+        exporter["last_success_at"] = success.isoformat() if success and success <= updated else None
+        for field in ("exported_counts", "pending_counts", "blocked_counts"):
+            counts = value.get(field)
+            if isinstance(counts, dict):
+                exporter[field] = {kind: counts[kind] for kind in ("routing", "cycle")
+                                   if type(counts.get(kind)) is int and 0 <= counts[kind] <= 2**63 - 1}
+        exporter["pending_scope"] = "scanned_window" if value.get("pending_scope") == "scanned_window" else "unknown"
+        if isinstance(value.get("scan_truncated"), dict):
+            exporter["scan_truncated"] = {kind: value["scan_truncated"][kind] for kind in ("routing", "cycle")
+                                          if type(value["scan_truncated"].get(kind)) is bool}
+        error = value.get("error_type")
+        safe_errors = {"BlockedExports", "InvalidAudit", "RejectedSpans", "OversizedResponse", "InvalidResponse",
+                       "ConnectionError", "ConnectTimeout", "ReadTimeout", "Timeout", "OperationalError", "InterfaceError"}
+        exporter["error_type"] = error if isinstance(error, str) and (error in safe_errors or re.fullmatch(r"HTTP[1-5][0-9]{2}", error)) else "ExportError" if error else None
+        candidates = value.get("recent_traces", [])
+        candidates = [item for item in candidates[:10] if isinstance(item, dict)] if isinstance(candidates, list) else []
+        receipts = {kind: export_receipts(kind, [item.get("key") for item in candidates if item.get("kind") == kind])
+                    for kind in ("routing", "cycle")}
+        for item in candidates:
+            kind, key, name, service = item.get("kind"), item.get("key"), item.get("name"), item.get("service")
+            if not isinstance(kind, str) or not isinstance(key, str) or not isinstance(name, str):
+                continue
+            receipt = receipts.get(kind, {}).get(key)
+            start, end = utc_timestamp(item.get("start")), utc_timestamp(item.get("end"))
+            if (receipt and receipt["audit_trace_id"] == item.get("trace_id") and name in AUDIT_SERVICES
+                    and isinstance(service, str) and service in AUDIT_SERVICES[name]
+                    and ((name == "agent.recorded_cycle") == (kind == "cycle")) and start and end and start <= end <= updated):
+                recent.append({"kind": kind, "key": key, "name": name, "service": service,
+                               "start": start.isoformat(), "end": end.isoformat(), **receipt})
+    except (OSError, ValueError, TypeError):
+        pass
+    jaeger = {**jaeger_services(), "checked_at": now.isoformat()}
+    status = exporter["status"]
+    if status == "healthy" and jaeger["status"] != "available":
+        status = "degraded"
+    return {"status": status, "checked_at": now.isoformat(), "exporter": exporter, "jaeger": jaeger,
+            "recent_traces": recent, "trace_origin": "recorded_audit",
+            "limitations": ["Audit traces use recorded routing-attempt and cycle start/end times; they are not live propagated pipeline traces.",
+                            "Export receipts confirm collector acceptance, not current Jaeger indexing or retention. Open a trace to check its availability.",
+                            "Per-tool and model-internal spans are unavailable. Token usage is recorded usage, not a billing statement.",
+                            "Pending counts cover only the scanned window, not the entire historical backlog. Trace search availability does not establish service-performance metrics availability."]}
 
 
 def clean(value, depth=0):
@@ -177,6 +339,7 @@ def routing_list(connect, limit=20):
         if not rows(conn, "SELECT to_regclass('public.routing_events') AS present")[0]["present"]:
             return {"items": [], "count": 0, "limitations": ["No routing audit table is available."]}
         found = rows(conn, "SELECT id,created_at,payload FROM routing_events ORDER BY id DESC LIMIT %s", (limit,))
+        receipts = export_receipts("routing", [row["payload"].get("event_id") for row in found])
         # Multiple stages of one observation reuse the same bounded original lookup.
         matches = {}
         for row in found:
@@ -189,7 +352,7 @@ def routing_list(connect, limit=20):
                                           and digest(item["raw"]) == identity[2]), None)
             original = matches[identity]
             data = original["payload"].get("data", {}) if original else {}
-            items.append({**row, "raw_message_id": original["id"] if original else None,
+            items.append({**row, **receipts.get(payload.get("event_id"), {}), "raw_message_id": original["id"] if original else None,
                           "original_status": "source_identity_and_raw_sha256" if original else "unresolved",
                           "title": data.get("title") if isinstance(data, dict) else None,
                           "excerpt": str(data.get("text", ""))[:500] if isinstance(data, dict) else None,
@@ -307,9 +470,11 @@ class Graph:
                      "AND raw_sha256=%s ORDER BY id DESC LIMIT %s", (envelope.get("source"), envelope.get("source_id"), digest(envelope["raw"]), remaining))
         if not found:
             self.limitations.append(f"Original {original['id']}: no persisted routing attempt was recorded; historical verdicts are not backfilled.")
+        receipts = export_receipts("routing", [row["payload"].get("event_id") for row in found])
         for row in found:
             payload = row["payload"]
             key = self.node("routing", row["id"], payload, payload.get("recorded_at", row["created_at"]), payload.get("outcome"))
+            self.nodes[key].update(receipts.get(payload.get("event_id"), {}))
             propagated = payload.get("trace")
             if isinstance(propagated, dict) and re.fullmatch(r"[0-9a-f]{32}", str(propagated.get("trace_id", ""))):
                 self.nodes[key]["runtime_trace_id"] = propagated["trace_id"]
@@ -453,5 +618,8 @@ def cycle_list(limit=30):
         except (OSError, ValueError):
             limitations.append(f"The legacy {role} summary could not be read.")
     items.sort(key=lambda value: value.get("started_at") or value.get("completed_at") or value.get("failed_at") or "", reverse=True)
-    limitations.append("Cycle summaries contain recorded outcomes and usage, not private model transcripts. Model/tool span detail is unavailable here.")
+    receipts = export_receipts("cycle", [item.get("cycle_id") for item in items[:limit]])
+    for item in items[:limit]:
+        item.update(receipts.get(item.get("cycle_id"), {}))
+    limitations.append("Cycle summaries contain recorded outcomes and usage. Audit-trace links confirm collector acceptance of recorded cycle timing; model/tool span detail is unavailable.")
     return clean({"items": items[:limit], "count": min(limit, len(items)), "limitations": list(dict.fromkeys(limitations))})
