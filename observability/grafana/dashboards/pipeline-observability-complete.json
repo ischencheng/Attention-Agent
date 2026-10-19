@@ -54,16 +54,6 @@
     },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "unit": "percentunit" }, "overrides": [] },
-      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 0 },
-      "id": 4,
-      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "center", "textMode": "value", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
-      "targets": [{ "expr": "pipeline_trace_completeness_ratio:5m", "refId": "A" }],
-      "title": "Trace Completeness",
-      "type": "stat"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
       "gridPos": { "h": 4, "w": 4, "x": 16, "y": 0 },
       "id": 5,

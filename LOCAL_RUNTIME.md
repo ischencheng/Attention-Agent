@@ -91,6 +91,16 @@ Runtime data, cycle audits and model artifacts live under the ignored
 broker handoffs, model artifacts and saved agent state. A running container alone
 does not establish successful processing or correct judgment.
 
+The supervisor also runs the independent recorded-audit exporter every 15 seconds.
+The dashboard's Observability view reports its freshness, export failures and
+Jaeger availability, with direct links from routing records and agent cycles.
+Jaeger preserves spans in a named Badger volume for seven days. These spans use
+the audits' actual timestamps. Forwarded relay timings include broker
+acknowledgment; Fast and legacy filter timings end before output delivery.
+Neither includes audit publication or offset commit. Missing upstream or
+per-tool timings remain unavailable. See the coverage and recovery commands in the
+[observability guide](observability/PIPELINE_OBSERVABILITY_GUIDE.md#4-recorded-execution-traces-in-jaeger).
+
 One logical Fast gate can use multiple calls for long sources or retries; a cache
 hit uses no new model call. Cached usage describes the original execution. Count
 distinct model artifacts and include failed attempts when measuring invocation

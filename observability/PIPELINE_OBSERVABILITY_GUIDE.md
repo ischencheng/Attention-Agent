@@ -6,19 +6,23 @@ It covers three layers:
 
 1. Service metrics (Prometheus + Grafana)
 2. End-to-end metrics and SLOs (Prometheus recording/alert rules)
-3. End-to-end trace pipeline (OpenTelemetry + Jaeger)
+3. Recorded execution audit traces (OpenTelemetry + Jaeger)
+
+The metrics sections are a configuration reference. Metric availability depends
+on the enabled services and successful Prometheus scrapes. Verifying recorded
+audit traces does not validate this metrics catalog or its SLO queries.
 
 ## 1. Current stack and files
 
-- Prometheus scrape config: `kafka-cluster/observability/prometheus.yml`
-- Prometheus rules: `kafka-cluster/observability/prometheus-rules.pipeline.yml`
-- OTel collector config: `kafka-cluster/observability/otel-collector-config.yaml`
-- Grafana datasources: `kafka-cluster/observability/grafana/provisioning/datasources/datasource.yml`
+- Prometheus scrape config: `observability/prometheus.yml`
+- Prometheus rules: `observability/prometheus-rules.pipeline.yml`
+- OTel collector config: `observability/otel-collector-config.yaml`
+- Grafana datasources: `observability/grafana/provisioning/datasources/datasource.yml`
 - Grafana dashboards:
-  - `kafka-cluster/observability/grafana/dashboards/kafka-classic-overview.json`
-  - `kafka-cluster/observability/grafana/dashboards/pipeline-e2e-observability.json`
-  - `kafka-cluster/observability/grafana/dashboards/pipeline-observability-complete.json`
-  - `kafka-cluster/observability/grafana/dashboards/pipeline-data-explorer.json`
+  - `observability/grafana/dashboards/kafka-classic-overview.json`
+  - `observability/grafana/dashboards/pipeline-e2e-observability.json`
+  - `observability/grafana/dashboards/pipeline-observability-complete.json`
+  - `observability/grafana/dashboards/pipeline-data-explorer.json`
 
 ## 2. Service metrics catalog
 
@@ -108,13 +112,12 @@ Note: exact metric names depend on exporter version and collector set. Confirm i
 
 ## 3. End-to-end metrics and SLOs
 
-The file `kafka-cluster/observability/prometheus-rules.pipeline.yml` defines recording rules:
+The file `observability/prometheus-rules.pipeline.yml` defines recording rules:
 
 - `pipeline_e2e_latency_seconds:p50`
 - `pipeline_e2e_latency_seconds:p95`
 - `pipeline_e2e_success_ratio:5m`
 - `pipeline_e2e_error_ratio:5m`
-- `pipeline_trace_completeness_ratio:5m`
 - `pipeline_freshness_seconds`
 
 Suggested SLO baseline:
@@ -123,48 +126,77 @@ Suggested SLO baseline:
 - success ratio: `pipeline_e2e_success_ratio:5m > 0.9`
 - error ratio: `pipeline_e2e_error_ratio:5m < 0.05`
 - freshness: `pipeline_freshness_seconds < 120`
-- trace completeness: `pipeline_trace_completeness_ratio:5m > 0.7`
 
-## 4. End-to-end trace pipeline (OTel + Jaeger)
+## 4. Recorded execution traces in Jaeger
 
-### Trace hierarchy
+The local supervisor runs `scripts/observability_exporter.py` independently of
+model scheduling. It reads routing audits and cycle summaries, sends bounded
+OTLP/HTTP batches to the Collector, and records collector acceptance in a
+separate SQLite receipt database. It does not write application evidence,
+acknowledge Kafka inputs, execute models, or change evaluation results.
 
-- `ingest.receive`
-  - `kafka.produce`
-- `flink.transform.normalize`
-- `fast_agent.triage`
-- `mid_agent.consume_clue`
-- `mid_agent.aggregate`
-- `strong_agent.decision`
-  - `kafka.produce`
-- `sink_consume_span`
-  - `sink_db_write_span`
-  - `sink_commit_span`
-- `api.ws.push`
-- API query spans:
-  - `api.signals.query`
-  - `api.insights.query`
-  - `api.overview.query`
-  - `api.frontend.vitals`
+| Service | Operation | Actual timing coverage |
+| --- | --- | --- |
+| `attention-routing` | `relay.recorded_handling` | Recorded handling through broker acknowledgment when forwarded, before audit publication and offset commit |
+| `attention-routing` | `filter.recorded_handling`, `fast.recorded_handling` | Recorded classification start to completion, before output delivery, audit publication and offset commit |
+| `attention-mid` | `agent.recorded_cycle` | Recorded Mid attempt, including failed attempts |
+| `attention-strong` | `agent.recorded_cycle` | Recorded Strong attempt, including failed attempts |
 
-### Context propagation
+Each span is an independent projection with `attention.trace_origin=recorded_audit`.
+Its stable ID identifies the exact audit record. These IDs are not propagated
+live contexts and do not establish parent/child relationships between stages.
+The dashboard's evidence graph separately displays verified source hashes,
+Kafka coordinates and explicit decision references.
 
-Across Kafka boundaries, context is propagated via:
+No spans are fabricated for source polling, Flink transformations, database
+operations, individual tools, or failed Fast requests without routing records.
+Tool metadata without timestamps remains untimed. Cached usage describes the
+historical cached result, not new tokens consumed by the displayed route.
+Attributes exclude prompts, article text, rationales, commands, tool outputs,
+URLs and credentials. A rejected routing decision is a valid outcome, not a
+runtime error; failed agent cycles are marked as errors.
 
-- Kafka headers (`traceparent` from OTel propagator)
-- payload field `traceparent` (used by Flink / agent paths)
+The dashboard's Observability view displays exporter freshness, collector
+acceptance counts and Jaeger availability. Direct links are present only for
+records with export receipts. Acceptance is not proof of retention or immediate
+query availability; Jaeger ingestion can lag. Pending counts describe the bounded
+scan window, and a truncated scan means additional records may remain.
 
-This allows one business event to be traced across ingestor -> flink -> fast-agent -> mid-agent -> strong-agent -> sink.
+Jaeger uses a named Badger volume with seven-day span retention. The volume
+initializer creates only the writable storage directory for the image's UID.
+Application originals, failed-cycle summaries and research archives have their
+own durable storage and outlive Jaeger's display retention.
 
-### Jaeger usage
+```sh
+# One bounded read/export pass; no model calls.
+.venv/bin/python scripts/observability_exporter.py --once --batch-size 500
 
-- Search by service: `bluesky-ingestor`, `flink-normalizer`, `fast-agent`, `mid-agent`, `strong-agent`, `sink-consumer`
-- Filter by operation names above
-- Compare slow traces to normal traces using operation duration breakdown
+# Explicit recovery after trace-storage loss: at most 500 recent records per kind.
+.venv/bin/python scripts/observability_exporter.py --replay 500
+```
+
+Stop the supervised exporter before an explicit replay; its instance lock avoids
+concurrent receipt writers. Network and retryable HTTP failures remain pending.
+Invalid records and OTLP partial rejections are visible as blocked; partial
+rejections require explicit replay after correction because OTLP does not identify
+which records were rejected. Do not reset application state or Kafka offsets.
+
+Search Jaeger by the services above and use a lookback that includes the record's
+original execution time. Backfilling an old audit preserves its original time;
+it does not create a new operation at the export time. Use the direct record
+links when available.
+
+The previous "trace completeness" ratio divided optional decision publications
+by Bluesky ingestion. It was not tracing coverage and penalized valid filtering
+and abstention. Its recording rule, alert and dashboard panel have been removed.
+This does not change financial evaluation or any historical decision.
+
+Protocol and storage contracts: [OTLP JSON encoding](https://opentelemetry.io/docs/specs/otlp/#json-protobuf-encoding)
+and [Jaeger 2.5.0 Badger configuration](https://github.com/jaegertracing/jaeger/blob/v2.5.0/cmd/jaeger/config-badger.yaml).
 
 ## 5. Grafana PostgreSQL datasource and SQL panels
 
-`kafka-cluster/observability/grafana/provisioning/datasources/datasource.yml` now includes:
+`observability/grafana/provisioning/datasources/datasource.yml` now includes:
 
 - Prometheus datasource (`uid: prometheus`)
 - Jaeger datasource (`uid: jaeger`)
@@ -201,7 +233,9 @@ After `docker compose up -d --build`:
 2. Grafana should show:
    - metrics dashboards populated
    - `Pipeline Data Explorer (PostgreSQL)` tables populated
-3. Jaeger should show cross-service traces with hierarchical spans.
+3. Jaeger should show recorded routing/cycle spans at their actual timestamps.
+   Verify a real relay, Fast rejection, successful cycle and failed cycle by
+   their exact audit IDs. Confirm those IDs still resolve after a Jaeger restart.
 
 ## 7. Recommended next hardening steps
 

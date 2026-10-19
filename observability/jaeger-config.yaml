@@ -1,0 +1,67 @@
+# Jaeger 2.5.0 configuration. Schema/example references:
+# https://github.com/jaegertracing/jaeger/blob/v2.5.0/cmd/jaeger/config-badger.yaml
+# https://github.com/jaegertracing/jaeger/blob/v2.5.0/internal/storage/v1/badger/config.go
+# The named volume is mounted at /badger. Initialize /badger/data for UID 10001
+# before starting Jaeger; the released image runs without root privileges.
+extensions:
+  healthcheckv2:
+    use_v2: true
+    http:
+      endpoint: 0.0.0.0:13133
+  jaeger_query:
+    storage:
+      traces: local_traces
+    http:
+      endpoint: 0.0.0.0:16686
+    grpc:
+      endpoint: 0.0.0.0:16685
+  jaeger_storage:
+    backends:
+      local_traces:
+        badger:
+          ephemeral: false
+          directories:
+            keys: /badger/data/keys
+            values: /badger/data/values
+          # Runtime spans expire after seven days. Durable judgment evidence
+          # remains in the application database and its research archive.
+          ttl:
+            spans: 168h
+          consistency: true
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    timeout: 2s
+
+exporters:
+  jaeger_storage_exporter:
+    trace_storage: local_traces
+
+service:
+  extensions: [jaeger_storage, jaeger_query, healthcheckv2]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [jaeger_storage_exporter]
+  telemetry:
+    resource:
+      service.name: jaeger
+    metrics:
+      level: detailed
+      readers:
+        - pull:
+            exporter:
+              prometheus:
+                host: 0.0.0.0
+                port: 8888
+    logs:
+      level: info

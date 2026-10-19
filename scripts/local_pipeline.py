@@ -234,6 +234,7 @@ def daemon():
                         "--host", "0.0.0.0", "--port", "8765", "--codex-bin", str(CODEX),
                         "--data-dir", str(RUNTIME), "--timeout", "180", "--prewarm"],
             "rss": [str(PYTHON), str(ROOT / "scripts/ingest_primary_rss.py")],
+            "observability": [str(PYTHON), str(ROOT / "scripts/observability_exporter.py")],
         }
         next_run = {"mid": 0.0, "strong": 0.0, "evaluation": 0.0}
         last_start = {}
