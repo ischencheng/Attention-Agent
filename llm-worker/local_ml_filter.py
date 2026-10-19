@@ -12,30 +12,12 @@ from typing import Any
 import requests
 from confluent_kafka import Consumer, KafkaException, Producer
 from prometheus_client import Counter, Histogram, start_http_server
+from worker_runtime import classify_with_codex, consumer_config, producer_config, produce_confirmed, retry_record
 
 
 LOGGER = logging.getLogger("local-ml-filter")
 FILTERED_TOTAL = Counter("local_ml_filter_total", "Local ML filter decisions", ["decision"])
 FILTER_LATENCY = Histogram("local_ml_filter_latency_seconds", "Local ML filter latency")
-DEBUG_LOG_PATH = "debug-c6c356.log"
-DEBUG_SESSION_ID = "c6c356"
-
-
-def debug_log(run_id: str, hypothesis_id: str, location: str, message: str, data: dict[str, Any]) -> None:
-    payload = {
-        "sessionId": DEBUG_SESSION_ID,
-        "runId": run_id,
-        "hypothesisId": hypothesis_id,
-        "location": location,
-        "message": message,
-        "data": data,
-        "timestamp": int(time.time() * 1000),
-    }
-    try:
-        with open(DEBUG_LOG_PATH, "a", encoding="utf-8") as handle:
-            handle.write(json.dumps(payload, ensure_ascii=True) + "\n")
-    except Exception:
-        pass
 
 
 def parse_args() -> argparse.Namespace:
@@ -47,12 +29,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--threshold", type=float, default=0.55)
     parser.add_argument("--metrics-port", type=int, default=8031)
     parser.add_argument("--poll-timeout-seconds", type=float, default=1.0)
-    parser.add_argument("--llm-provider", choices=("gemini", "local"), default="gemini")
+    parser.add_argument("--llm-provider", choices=("gemini", "local", "codex"), default="gemini")
     parser.add_argument("--llm-model", default=os.getenv("LOCAL_FILTER_MODEL", "gemini-2.5-flash-lite"))
     parser.add_argument("--llm-api-key", default=os.getenv("GEMINI_API_KEY", ""))
-    parser.add_argument("--llm-timeout-seconds", type=float, default=12.0)
-    parser.add_argument("--llm-batch-window-seconds", type=float, default=10.0)
-    parser.add_argument("--llm-batch-max-size", type=int, default=32)
+    parser.add_argument("--llm-timeout-seconds", type=float, default=float(os.getenv("LLM_TIMEOUT_SECONDS", "180")))
+    parser.add_argument("--llm-batch-window-seconds", type=float, default=10.0, help="Legacy compatibility flag; records now process sequentially")
+    parser.add_argument("--llm-batch-max-size", type=int, default=32, help="Legacy compatibility flag; records now process sequentially")
     parser.add_argument("--log-level", default="INFO")
     return parser.parse_args()
 
@@ -95,7 +77,7 @@ def build_message_text(payload: dict[str, Any]) -> str:
     if ct == "social_post":
         return (data.get("text") or "").strip()
     if ct == "news_article":
-        return f"{data.get('title', '')} {data.get('snippet', '')}".strip()
+        return f"{data.get('title', '')} {data.get('text') or data.get('snippet', '')}".strip()
     if ct == "price_tick":
         return ""  # price ticks should be auto-forwarded, not LLM-filtered
     return json.dumps(data, ensure_ascii=False)[:2000]
@@ -127,15 +109,6 @@ def get_gemini_yes_no(payload: dict[str, Any], model: str, api_key: str, timeout
         "Reply with only YES or NO.\n"
         f"[{source}] {message_text}"
     )
-    # region agent log
-    debug_log(
-        run_id="pre-fix",
-        hypothesis_id="H1",
-        location="local_ml_filter.py:get_gemini_yes_no",
-        message="gemini_input",
-        data={"model": model, "message_preview": message_text[:500]},
-    )
-    # endregion
     endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
     request_body = {
         "contents": [{"parts": [{"text": prompt}]}],
@@ -184,95 +157,48 @@ def get_gemini_yes_no(payload: dict[str, Any], model: str, api_key: str, timeout
     if not isinstance(parts, list) or not parts:
         return None
     output_text = str(parts[0].get("text") or "")
-    # region agent log
-    debug_log(
-        run_id="pre-fix",
-        hypothesis_id="H2",
-        location="local_ml_filter.py:get_gemini_yes_no",
-        message="gemini_output",
-        data={"model": model, "output": output_text[:500]},
-    )
-    # endregion
     return parse_yes_no(output_text)
 
 
-def process_pending_batch(
-    pending: list[tuple[Any, dict[str, Any]]],
-    args: argparse.Namespace,
-    producer: Producer,
-    consumer: Consumer,
-) -> None:
-    if not pending:
-        return
-
-    for msg, payload in pending:
-        with FILTER_LATENCY.time():
-            is_yes: bool | None = None
-            model_used = "local_heuristic"
-            if args.llm_provider == "gemini":
-                try:
-                    is_yes = get_gemini_yes_no(
-                        payload=payload,
-                        model=args.llm_model,
-                        api_key=args.llm_api_key,
-                        timeout_seconds=args.llm_timeout_seconds,
-                    )
-                    if is_yes is not None:
-                        model_used = args.llm_model
-                except Exception as exc:
-                    LOGGER.warning("gemini classify failed, fallback local score: %s", exc)
+def process_record(msg: Any, payload: dict[str, Any], args: argparse.Namespace,
+                   producer: Producer, consumer: Consumer) -> None:
+    with FILTER_LATENCY.time():
+        model_used = "local_heuristic"
+        if payload.get("content_type") == "price_tick":
+            is_yes, model_used = True, "price_tick_passthrough"
+        elif args.llm_provider == "codex":
+            is_yes, model_used = classify_with_codex(payload, "filter", build_message_text(payload), args.llm_timeout_seconds)
+        elif args.llm_provider == "gemini":
+            is_yes = get_gemini_yes_no(payload, args.llm_model, args.llm_api_key, args.llm_timeout_seconds)
+            model_used = args.llm_model
             if is_yes is None:
-                is_yes = get_relevance_score(payload) >= args.threshold
-
-            # region agent log
-            debug_log(
-                run_id="pre-fix",
-                hypothesis_id="H3",
-                location="local_ml_filter.py:process_pending_batch",
-                message="decision_eval",
-                data={
-                    "topic": msg.topic(),
-                    "partition": int(msg.partition()),
-                    "offset": int(msg.offset()),
-                    "decision": "yes" if is_yes else "no",
-                    "model_used": model_used,
-                },
-            )
-            # endregion
-
-            if is_yes:
-                message_key = derive_message_key(payload, msg.key())
-                producer.produce(
-                    topic=args.output_topic,
-                    key=message_key.encode("utf-8"),
-                    value=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-                    headers=msg.headers(),
-                )
-                producer.poll(0)
-                FILTERED_TOTAL.labels("yes").inc()
-            else:
-                FILTERED_TOTAL.labels("no").inc()
+                raise ValueError("Gemini classification unavailable or invalid; no heuristic fallback")
+        else:
+            is_yes = get_relevance_score(payload) >= args.threshold
+        if is_yes:
+            output = dict(payload)
+            output["local_ml_filter"] = {"verdict": True, "score": 1.0, "provider": args.llm_provider, "model": model_used}
+            produce_confirmed(producer, topic=args.output_topic,
+                              key=derive_message_key(payload, msg.key()).encode("utf-8"),
+                              value=json.dumps(output, ensure_ascii=False).encode("utf-8"), headers=msg.headers())
         consumer.commit(message=msg, asynchronous=False)
+        FILTERED_TOTAL.labels("yes" if is_yes else "no").inc()
+
+
+def process_pending_batch(pending: list[tuple[Any, dict[str, Any]]], args: argparse.Namespace,
+                          producer: Producer, consumer: Consumer) -> None:
+    # Kept as a small callable for offline replay. Exceptions stop the batch before later offsets.
+    for msg, payload in pending:
+        process_record(msg, payload, args, producer, consumer)
 
 
 def main() -> None:
     args = parse_args()
-    logging.basicConfig(
-        level=getattr(logging, args.log_level.upper(), logging.INFO),
-        format="%(asctime)s %(levelname)s %(name)s %(message)s",
-    )
+    logging.basicConfig(level=getattr(logging, args.log_level.upper(), logging.INFO),
+                        format="%(asctime)s %(levelname)s %(name)s %(message)s")
     start_http_server(args.metrics_port)
-
-    consumer = Consumer(
-        {
-            "bootstrap.servers": args.bootstrap,
-            "group.id": args.group_id,
-            "auto.offset.reset": "earliest",
-            "enable.auto.commit": False,
-            "allow.auto.create.topics": False,
-        }
-    )
-    producer = Producer({"bootstrap.servers": args.bootstrap})
+    consumer = Consumer(consumer_config(args.bootstrap, args.group_id))
+    producer = Producer(producer_config(args.bootstrap))
     running = True
 
     def handle_signal(*_: Any) -> None:
@@ -281,97 +207,28 @@ def main() -> None:
 
     signal.signal(signal.SIGINT, handle_signal)
     signal.signal(signal.SIGTERM, handle_signal)
-
-    # Wait for input topic to exist (handles startup race with Flink)
-    MAX_TOPIC_WAIT = 120  # seconds
-    topic_ready = False
-    wait_start = time.monotonic()
-    while running and not topic_ready:
-        try:
-            consumer.subscribe([args.input_topic])
-            # Do a short poll to check for UNKNOWN_TOPIC errors
-            test_msg = consumer.poll(2.0)
-            if test_msg is not None and test_msg.error():
-                err = test_msg.error()
-                if err.code() in (KafkaException(err).args[0].code() if False else -1,):
-                    pass  # won't reach
-                code_name = err.name()
-                if "UNKNOWN_TOPIC" in code_name:
-                    elapsed = time.monotonic() - wait_start
-                    if elapsed > MAX_TOPIC_WAIT:
-                        LOGGER.error("topic %s not available after %ds, giving up", args.input_topic, MAX_TOPIC_WAIT)
-                        raise KafkaException(err)
-                    LOGGER.info("waiting for topic %s ... (%.0fs)", args.input_topic, elapsed)
-                    consumer.unsubscribe()
-                    time.sleep(5)
-                    continue
-                else:
-                    raise KafkaException(err)
-            topic_ready = True
-        except KafkaException as exc:
-            err_str = str(exc)
-            if "UNKNOWN_TOPIC" in err_str:
-                elapsed = time.monotonic() - wait_start
-                if elapsed > MAX_TOPIC_WAIT:
-                    raise
-                LOGGER.info("waiting for topic %s ... (%.0fs)", args.input_topic, elapsed)
-                try:
-                    consumer.unsubscribe()
-                except Exception:
-                    pass
-                time.sleep(5)
-            else:
-                raise
-
-    LOGGER.info(
-        "local-ml-filter started input=%s output=%s threshold=%.2f llm_window_s=%.1f llm_batch_max=%s",
-        args.input_topic,
-        args.output_topic,
-        args.threshold,
-        args.llm_batch_window_seconds,
-        args.llm_batch_max_size,
-    )
-    pending: list[tuple[Any, dict[str, Any]]] = []
-    next_flush = time.monotonic() + max(0.5, args.llm_batch_window_seconds)
-
+    consumer.subscribe([args.input_topic])
+    LOGGER.info("local-ml-filter started input=%s output=%s provider=%s", args.input_topic, args.output_topic, args.llm_provider)
     try:
         while running:
             msg = consumer.poll(args.poll_timeout_seconds)
-            if msg is not None:
-                if msg.error():
-                    err = msg.error()
-                    if "UNKNOWN_TOPIC" in err.name():
-                        LOGGER.warning("topic temporarily unavailable, retrying...")
-                        time.sleep(2)
-                        continue
-                    raise KafkaException(err)
-
-                payload = decode_payload(msg.value())
-                if payload is None:
-                    # region agent log
-                    debug_log(
-                        run_id="pre-fix",
-                        hypothesis_id="H2",
-                        location="local_ml_filter.py:main",
-                        message="invalid_payload",
-                        data={"topic": msg.topic(), "partition": int(msg.partition()), "offset": int(msg.offset())},
-                    )
-                    # endregion
-                    FILTERED_TOTAL.labels("invalid_payload").inc()
-                    consumer.commit(message=msg, asynchronous=False)
-                else:
-                    pending.append((msg, payload))
-
-            now = time.monotonic()
-            batch_max = max(1, int(args.llm_batch_max_size))
-            should_flush = bool(pending) and (now >= next_flush or len(pending) >= batch_max)
-            if should_flush:
-                process_pending_batch(pending, args, producer, consumer)
-                pending.clear()
-                next_flush = now + max(0.5, args.llm_batch_window_seconds)
+            if msg is None:
+                continue
+            if msg.error():
+                if "UNKNOWN_TOPIC" in msg.error().name():
+                    time.sleep(2)
+                    continue
+                raise KafkaException(msg.error())
+            payload = decode_payload(msg.value())
+            if payload is None:
+                # Invalid inputs are explicit drops; a commit failure is still retried in order.
+                LOGGER.warning("invalid JSON payload at %s/%s/%s", msg.topic(), msg.partition(), msg.offset())
+                operation = lambda: consumer.commit(message=msg, asynchronous=False)
+            else:
+                operation = lambda: process_record(msg, payload, args, producer, consumer)
+            if not retry_record(operation, lambda: running):
+                break
     finally:
-        if pending:
-            process_pending_batch(pending, args, producer, consumer)
         producer.flush(10)
         consumer.close()
         LOGGER.info("local-ml-filter stopped")
