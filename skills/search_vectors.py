@@ -7,6 +7,7 @@ Usage:
 from __future__ import annotations
 
 import json
+import math
 import os
 import sys
 from datetime import datetime
@@ -29,7 +30,25 @@ EMBEDDING_DIM = int(os.environ.get("EMBEDDING_DIM", "768"))
 
 
 def get_embedding(text: str) -> list[float] | None:
-    """Call Gemini embedding API to vectorize query text."""
+    """Use the same embedding space as the ingestion worker."""
+    if os.environ.get("EMBEDDING_PROVIDER") == "http":
+        token = os.environ.get("ATTENTION_GATEWAY_TOKEN", "")
+        response = requests.post(
+            os.environ.get("EMBEDDING_GATEWAY_URL", "http://127.0.0.1:8765/embed"),
+            json={"text": text, "dimensions": EMBEDDING_DIM},
+            headers={"Authorization": f"Bearer {token}"} if token else {},
+            timeout=120,
+        )
+        response.raise_for_status()
+        result = response.json()
+        values = result.get("embedding")
+        if result.get("model") != EMBEDDING_MODEL:
+            raise ValueError("Embedding model does not match the configured search space")
+        if (not isinstance(values, list) or len(values) != EMBEDDING_DIM
+                or any(type(v) not in (int, float) or not math.isfinite(v) for v in values)
+                or not any(values)):
+            raise ValueError("Invalid semantic query embedding")
+        return values
     if not GEMINI_API_KEY:
         return None
     endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{EMBEDDING_MODEL}:embedContent"
@@ -54,7 +73,7 @@ def get_embedding(text: str) -> list[float] | None:
 def search(query_text: str, top_k: int = 5) -> list[dict]:
     embedding = get_embedding(query_text)
     if embedding is None:
-        return [{"error": "Failed to generate embedding. Check GEMINI_API_KEY."}]
+        return [{"error": "Failed to generate embedding. Check configured embedding provider."}]
 
     vec_literal = "[" + ",".join(f"{v:.10f}" for v in embedding) + "]"
 
@@ -70,10 +89,11 @@ def search(query_text: str, top_k: int = 5) -> list[dict]:
                     1 - (embedding_vec <=> %s::vector) AS similarity
                 FROM vector_embeddings
                 WHERE embedding_vec IS NOT NULL
+                  AND payload->>'embedding_model' = %s
                 ORDER BY embedding_vec <=> %s::vector
                 LIMIT %s
                 """,
-                (vec_literal, vec_literal, top_k),
+                (vec_literal, EMBEDDING_MODEL, vec_literal, top_k),
             )
             rows = cur.fetchall()
             return [dict(r) for r in rows]

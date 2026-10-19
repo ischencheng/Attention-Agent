@@ -12,6 +12,13 @@ The existing stack connects multi-source ingestion, Kafka/Flink, LLM workers,
 PostgreSQL, FastAPI and a React dashboard. See [CLAUDE.md](CLAUDE.md) for the
 architecture and development commands.
 
+For the complete local deployment, use [the runtime guide](LOCAL_RUNTIME.zh-CN.md).
+`scripts/local_pipeline.py start` starts the actual streaming services and a
+persistent host supervisor for Codex filtering/Fast, semantic embeddings,
+Mid/Strong and production-result evaluation. The dashboard exposes each stage
+and the agents' last saved state. Merely starting idle agent containers is not
+an agent schedule.
+
 ## Continuing judgment and delayed evaluation
 
 The [Attention Judgment environment](environments/attention_judgment/README.md)
@@ -22,11 +29,15 @@ calendar, price/benchmark evaluator, source coverage and a bounded daily loop.
 It does not require a fixed portfolio, and no real orders are placed.
 
 Mid and Strong now run through the open-source Codex CLI 0.163.0. Their existing
-state IDs remain compatible. The Gemini attention filters remain lightweight
-classifiers; the replacement concerns the stateful research/decision agents.
+state IDs remain compatible. The local deployment also uses Codex for filtering
+and Fast, with a real local embedding model; Gemini remains an optional provider.
 See [agent/AGENTS.md](agent/AGENTS.md), `.env.example`, and the environment README
 for authentication, operation and measured limitations. The hosted model itself
 is not claimed to be open source.
+
+`pipeline.py` observes real `decision_packets`, independently verifies provenance,
+and freezes them in `runs/production/`. The earlier `run.py`/`daily.py` RSS pilot
+is a separate experiment and is not evidence that the production pipeline ran.
 
 ## Evidence provenance and software engineering evaluation
 

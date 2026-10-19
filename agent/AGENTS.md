@@ -62,6 +62,11 @@ Do not reset state when no new messages arrive or when the process restarts.
 
 Mid keeps `pending_themes`, including theme ID, ticket IDs, source identities,
 independent causal events, first/last seen times and unresolved questions.
+Keep state compact: store original record IDs, content hashes and short factual
+references, not full copies of tickets, raw articles or embedding arrays. The
+immutable database originals are the source of record. If older state contains
+redundant `payload_snapshot` copies, replace those copies with IDs and hashes
+while retaining the theme, evidence identity, questions and judgment history.
 
 Strong keeps a `theses` map with stable thesis IDs and an append-only `revisions`
 array for each thesis. Each revision records its timestamp, prior revision,
@@ -140,6 +145,18 @@ are `traversability`, `barbell_position`, `moat`, `cycle_position`,
 `NOT APPLICABLE: <reason>` where justified instead of inventing an analysis or
 omitting a field. `db_write.py` rejects incomplete or untraceable decisions.
 
+For an explicitly supported, testable market forecast, optionally add
+`forecasts: [{"symbol": "<ticker>", "horizon": "day|week|month",
+"p_outperform_spy": <number from 0 to 1>, "reason": "<evidence and uncertainty>"}]`.
+Use exactly these four keys per forecast and one entry per symbol/horizon.
+This probability means price return greater than SPY, from the first regular
+market open after the independent evaluator freezes the decision to that day's,
+week's or month's final close. Do not backdate entry to a news timestamp, use a
+confidence field as a probability, or force forecasts from insufficient data.
+An empty array is valid abstention. Long-term theses still require their own
+invalidation conditions and evidence review; short-term price movement alone
+does not validate the thesis.
+
 If a tool failure prevents a new decision, preserve the durable thesis update
 and report the blocker. Never erase an invalidation merely because an unrelated
 price/search tool failed. Do not rewrite published snapshots or their links.
@@ -151,3 +168,8 @@ publication count, actual state-save status and explicit blockers. `completed`
 and `no_new_information` require successful completion of the applicable work;
 use `blocked` for an incomplete cycle. CLI events and a valid final JSON report
 do not by themselves prove the quality of a thesis or its future outcome.
+If a tool error is corrected and the required operation subsequently succeeds,
+record the recovery in the cycle summary and complete the cycle normally. An
+already resolved SQL typo is not an unresolved blocker. Actual database columns
+are `id`, `payload`, `raw` (raw_messages only), Kafka coordinates and timestamps;
+source identity lives in `payload->>'source'` and `payload->>'source_id'`.

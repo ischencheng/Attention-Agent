@@ -3,11 +3,13 @@ services:
     image: apache/kafka:3.7.1
     container_name: kafka1
     hostname: kafka1
+    restart: unless-stopped
     networks: [backend]
     ports:
       - "9092:9092"   # host -> kafka1 external listener
       - "29092:29092"   
     environment:
+      KAFKA_HEAP_OPTS: "-Xms256m -Xmx512m"
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: "broker,controller"
 
@@ -40,7 +42,7 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
       KAFKA_DEFAULT_REPLICATION_FACTOR: 3
       KAFKA_MIN_INSYNC_REPLICAS: 2
-      KAFKA_LOG_RETENTION_MS: 14400000
+      KAFKA_LOG_RETENTION_MS: 604800000
       KAFKA_LOG_RETENTION_CHECK_INTERVAL_MS: 60000
 
       # KRaft cluster id (must be same on all nodes)
@@ -59,11 +61,13 @@ services:
     image: apache/kafka:3.7.1
     container_name: kafka2
     hostname: kafka2
+    restart: unless-stopped
     networks: [backend]
     ports:
       - "9093:9092"   # host -> kafka2 external listener
       - "29093:29093"   
     environment:
+      KAFKA_HEAP_OPTS: "-Xms256m -Xmx512m"
       KAFKA_NODE_ID: 2
       KAFKA_PROCESS_ROLES: "broker,controller"
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT"
@@ -78,7 +82,7 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
       KAFKA_DEFAULT_REPLICATION_FACTOR: 3
       KAFKA_MIN_INSYNC_REPLICAS: 2
-      KAFKA_LOG_RETENTION_MS: 14400000
+      KAFKA_LOG_RETENTION_MS: 604800000
       KAFKA_LOG_RETENTION_CHECK_INTERVAL_MS: 60000
       CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qk"
     volumes:
@@ -94,11 +98,13 @@ services:
     image: apache/kafka:3.7.1
     container_name: kafka3
     hostname: kafka3
+    restart: unless-stopped
     networks: [backend]
     ports:
       - "9094:9092"   # host -> kafka3 external listener
       - "29094:29094"   
     environment:
+      KAFKA_HEAP_OPTS: "-Xms256m -Xmx512m"
       KAFKA_NODE_ID: 3
       KAFKA_PROCESS_ROLES: "broker,controller"
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT"
@@ -113,7 +119,7 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
       KAFKA_DEFAULT_REPLICATION_FACTOR: 3
       KAFKA_MIN_INSYNC_REPLICAS: 2
-      KAFKA_LOG_RETENTION_MS: 14400000
+      KAFKA_LOG_RETENTION_MS: 604800000
       KAFKA_LOG_RETENTION_CHECK_INTERVAL_MS: 60000
       CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qk"
     volumes:
@@ -214,6 +220,7 @@ services:
         jobmanager.rpc.address: flink-jobmanager
         metrics.reporter.prom.factory.class: org.apache.flink.metrics.prometheus.PrometheusReporterFactory
         metrics.reporter.prom.port: 9249
+        jobmanager.memory.process.size: 768m
     restart: unless-stopped
     depends_on:
       kafka1:
@@ -239,6 +246,8 @@ services:
         jobmanager.rpc.address: flink-jobmanager
         metrics.reporter.prom.factory.class: org.apache.flink.metrics.prometheus.PrometheusReporterFactory
         metrics.reporter.prom.port: 9250
+        taskmanager.memory.process.size: 1536m
+        taskmanager.numberOfTaskSlots: 2
     restart: unless-stopped
     depends_on:
       - flink-jobmanager
@@ -254,10 +263,9 @@ services:
       OTEL_SERVICE_NAME: flink-job
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
       INVESTMENT_KEYWORDS: "ai,earnings,guidance,capex,datacenter,storage,power,energy,nuclear,semiconductor,gpu,inference,llm,margin,valuation,cpi,fed,yield"
-    command:
-      - "/bin/sh"
-      - "-c"
-      - "until curl -fsS http://flink-jobmanager:8081/overview > /dev/null; do sleep 2; done; if flink list -m flink-jobmanager:8081 -r | grep -q \"source-raw-to-clean-and-embedding\"; then echo \"flink job already running; skip submit\"; else flink run -m flink-jobmanager:8081 -d -py /opt/flink/usrlib/bluesky_flink_job.py --bootstrap kafka1:19092,kafka2:19092,kafka3:19092 --raw-topic source_raw --clean-topic source_clean --startup-mode earliest --parallelism 1; fi; tail -f /dev/null"
+    volumes:
+      - ./flink/submit-job.sh:/opt/flink/submit-job.sh:ro
+    command: ["/bin/sh", "/opt/flink/submit-job.sh"]
     restart: unless-stopped
     depends_on:
       - flink-jobmanager
@@ -356,6 +364,8 @@ services:
     networks: [backend]
     environment:
       PYTHONUNBUFFERED: "1"
+      CODEX_GATEWAY_URL: "${CODEX_GATEWAY_URL:-http://host.docker.internal:8765/classify}"
+      ATTENTION_GATEWAY_TOKEN: "${ATTENTION_GATEWAY_TOKEN:-}"
       GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
       OTEL_SERVICE_NAME: local-ml-filter
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
@@ -373,11 +383,11 @@ services:
       - "--threshold"
       - "0.55"
       - "--llm-provider"
-      - "gemini"
+      - "${CLASSIFICATION_PROVIDER:-codex}"
       - "--llm-model"
-      - "gemini-2.5-flash-lite"
+      - "${CLASSIFICATION_MODEL:-gpt-6.1-sol}"
       - "--llm-timeout-seconds"
-      - "30"
+      - "240"
       - "--metrics-port"
       - "8031"
     ports:
@@ -402,6 +412,8 @@ services:
     networks: [backend]
     environment:
       PYTHONUNBUFFERED: "1"
+      EMBEDDING_GATEWAY_URL: "${EMBEDDING_GATEWAY_URL:-http://host.docker.internal:8765/embed}"
+      ATTENTION_GATEWAY_TOKEN: "${ATTENTION_GATEWAY_TOKEN:-}"
       GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
       OTEL_SERVICE_NAME: embed-worker
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
@@ -417,13 +429,13 @@ services:
       - "--group-id"
       - "embed-worker-v2"
       - "--embedding-provider"
-      - "gemini"
+      - "${EMBEDDING_PROVIDER:-http}"
       - "--embedding-model"
-      - "gemini-embedding-001"
+      - "${EMBEDDING_MODEL:-sentence-transformers/all-mpnet-base-v2}"
       - "--embedding-dim"
       - "768"
       - "--embedding-timeout-seconds"
-      - "15"
+      - "120"
       - "--metrics-port"
       - "8034"
     ports:
@@ -448,6 +460,8 @@ services:
     networks: [backend]
     environment:
       PYTHONUNBUFFERED: "1"
+      CODEX_GATEWAY_URL: "${CODEX_GATEWAY_URL:-http://host.docker.internal:8765/classify}"
+      ATTENTION_GATEWAY_TOKEN: "${ATTENTION_GATEWAY_TOKEN:-}"
       GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
       OTEL_SERVICE_NAME: fast-agent
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
@@ -463,11 +477,11 @@ services:
       - "--group-id"
       - "fast-agent-v1"
       - "--llm-provider"
-      - "gemini"
+      - "${CLASSIFICATION_PROVIDER:-codex}"
       - "--llm-model"
-      - "gemini-2.5-flash-lite"
+      - "${CLASSIFICATION_MODEL:-gpt-6.1-sol}"
       - "--llm-timeout-seconds"
-      - "30"
+      - "240"
       - "--metrics-port"
       - "8030"
       - "--attention-threshold"
@@ -583,6 +597,7 @@ services:
         condition: service_healthy
 
   mid-agent:
+    profiles: [container-agents]
     build:
       context: ./agent
       dockerfile: Dockerfile
@@ -618,6 +633,7 @@ services:
         condition: service_healthy
 
   strong-agent:
+    profiles: [container-agents]
     build:
       context: ./agent
       dockerfile: Dockerfile
