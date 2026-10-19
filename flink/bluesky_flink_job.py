@@ -74,9 +74,11 @@ def process_raw(payload: Dict[str, Any], keywords: set[str]) -> Optional[Dict[st
     if content_type == "price_tick":
         return payload
 
-    # Twitter source passes through without keyword filter (pre-filtered by following list)
+    # Twitter is selected by following list; SEC/FRED originals are requested
+    # explicitly after research discovery. Preserve these records for downstream
+    # Codex filtering even when structured metadata has no topic keywords.
     source = payload.get("source", "")
-    if source == "twitter":
+    if source in {"twitter", "sec_edgar", "fred"}:
         return payload
 
     # For other social_post and news_article, apply keyword filter
@@ -188,6 +190,13 @@ def run_flink_job(args: argparse.Namespace) -> None:
 
 
 def run_single_file_test() -> None:
+    metadata = {"source_id": "original-1", "content_type": "news_article",
+                "data": {"title": "Form 8-K", "text": "Board appointment"}}
+    for source in ("sec_edgar", "fred"):
+        original = {**metadata, "source": source}
+        assert process_raw(original, {"gpu", "ai"}) is original
+    assert process_raw({**metadata, "source": "unknown"}, {"gpu", "ai"}) is None
+    assert process_raw({"source": "sec_edgar"}, {"gpu", "ai"}) is None
     raw_str = r'''
     {
       "source": "bluesky",

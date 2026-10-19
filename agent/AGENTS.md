@@ -53,6 +53,33 @@ Use available search tools only when they are actually present. Do not claim
 that a web search, source read or framework call happened unless its tool result
 was observed. A denied network/tool call is a blocker, not negative evidence.
 
+For a company or macroeconomic question discovered in the incoming evidence,
+`research_sources.py` retrieves SEC filings/company facts or FRED observations:
+
+```bash
+python /app/skills/research_sources.py '{"source":"sec_filings","symbol":"<discovered ticker>","limit":3}' --publish
+python /app/skills/research_sources.py '{"source":"sec_facts","symbol":"<discovered ticker>","concept":"Revenues","limit":3}' --publish
+python /app/skills/research_sources.py '{"source":"fred","series_id":"<relevant series>","as_of":"YYYY-MM-DD","limit":5}' --publish
+```
+
+Do not use a fixed ticker list. Use these tools to answer a specific open
+question; make no more than three new source requests per cycle. `--publish`
+sends the originals through `source_raw` and the normal multi-level pipeline;
+it does not authorize bypassing validation or inserting a decision directly.
+The tool archives raw responses and acknowledges Kafka delivery. Missing
+`SEC_EDGAR_USER_AGENT` or `FRED_API_KEY` returns an explicit blocked result.
+Do not print configuration values. Never infer a successful lookup from code
+existence or from an empty result.
+
+SEC responses are current snapshots. Respect each fact's filing date, fiscal
+period, unit, form and accession. A retired concept can return old data; check
+the dates before using it and do not silently treat an old tag as current.
+FRED pins both real-time dates to the requested as-of date, preserving the
+returned vintage intervals. Economic period, filing/publication time and actual
+observation time are separate. Fetching old data today does not make it evidence
+available to a past forward decision. Different fields of one filing remain
+one causal source event, not independent corroboration.
+
 ## Durable state across independent cycles
 
 Read your state before each cycle and save it afterwards. The default keys
