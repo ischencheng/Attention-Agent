@@ -328,6 +328,21 @@ class CycleAndSettlementTests(unittest.TestCase):
         self.assertEqual(len(reviewed), 45)
         self.assertEqual(len(set(reviewed)), 45)
 
+    def test_unknown_tool_event_cannot_escape_frozen_input_protocol(self):
+        import codex_runner
+        item = observed()
+        path = self.root / "input.jsonl"
+        path.write_text(json.dumps(item))
+        args = SimpleNamespace(input=path, fetch=False, as_of=None, run_root=self.root / "attempts",
+                               timeout=10, model=None, codex_bin="unused")
+        output = {"final": batch(discovery([item])), "usage": {},
+                  "events": [{"type": "item.completed", "item": {"type": "future_new_browser_tool"}}]}
+        with patch.object(codex_runner, "run", return_value=output), self.assertRaisesRegex(ValueError, "outside the frozen"):
+            runner.cycle(args, self.ledger)
+        self.assertEqual(len(self.ledger.entries("observation")), 1)
+        self.assertEqual(self.ledger.entries("cycle"), [])
+        self.assertEqual(self.ledger.entries("judgment"), [])
+
     def test_passive_price_observations_are_not_prediction_success(self):
         self.freeze_symbol(forecast=False)
         self.settle_with({"status": "resolved", "excess_return": 0.2})

@@ -12,6 +12,22 @@ The existing stack connects multi-source ingestion, Kafka/Flink, LLM workers,
 PostgreSQL, FastAPI and a React dashboard. See [CLAUDE.md](CLAUDE.md) for the
 architecture and development commands.
 
+## Continuing judgment and delayed evaluation
+
+The [Attention Judgment environment](environments/attention_judgment/README.md)
+uses the original topic scope to discover research questions, retain/revise
+MrBrain-informed theses, and freeze predictions before daily, weekly and monthly
+market observations. It includes a Codex runner, durable audit ledger, real market
+calendar, price/benchmark evaluator, source coverage and a bounded daily loop.
+It does not require a fixed portfolio, and no real orders are placed.
+
+Mid and Strong now run through the open-source Codex CLI 0.163.0. Their existing
+state IDs remain compatible. The Gemini attention filters remain lightweight
+classifiers; the replacement concerns the stateful research/decision agents.
+See [agent/AGENTS.md](agent/AGENTS.md), `.env.example`, and the environment README
+for authentication, operation and measured limitations. The hosted model itself
+is not claimed to be open source.
+
 ## Evidence provenance and software engineering evaluation
 
 The [Attention Provenance environment](environments/attention_provenance/README.md)

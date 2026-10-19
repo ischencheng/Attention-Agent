@@ -1,10 +1,10 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Development guidance for this repository. Runtime Mid/Strong instructions are in `agent/AGENTS.md`.
 
 ## Overview
 
-AI Attention Proxy — a multi-source information consumption pipeline built on a 3-node KRaft Kafka cluster. It ingests real-time data from Bluesky, Twitter, Finnhub (stock prices), and Polygon.io (financial news), runs them through a multi-stage LLM processing chain, and surfaces investment-relevant signals in a React frontend. Mid/strong agent work is delegated to external agents (Claude Code, Codex, etc.) via CLI skills.
+AI Attention Proxy — a multi-source information consumption pipeline built on a 3-node KRaft Kafka cluster. It ingests real-time data from Bluesky, Twitter, Finnhub (stock prices), and Polygon.io (financial news), runs them through a multi-stage LLM processing chain, and surfaces investment-relevant signals in a React frontend. Mid/strong agent work is delegated to Codex CLI agents via Python skills.
 
 ## Key Commands
 
@@ -157,14 +157,14 @@ All messages use a unified envelope: `{source, source_id, content_type, timestam
 - **skills/mrbrain_invest.py** — Evaluate investments using MrBrain's 10-layer framework (value investing, risk management, macro cycles, competition theory, psychology). Source: 43 videos from 脑总MrBrain. Reference: `MrBrain-invest-principle/`
 
 **Agent** (`agent/`):
-- **agent/CLAUDE.md** — Workspace instructions for mid/strong agents running inside Docker
-- **agent/Dockerfile** — Container that runs Claude Code as an agent with mounted skills
-- Mid/strong agent services in docker-compose mount `skills/` and `agent/CLAUDE.md`
+- **agent/AGENTS.md** — Workspace instructions for mid/strong agents running inside Docker
+- **agent/Dockerfile** — Container that runs Codex CLI 0.163.0 with mounted Python skills
+- Mid/strong agent services in docker-compose mount `skills/`; `agent/AGENTS.md` and the Codex runner are copied into the image
 - **trigger_agents.sh** — Scheduling & manual trigger script:
   - Loop mode: mid-agent every 30m, strong-agent every 40m (independent timers)
   - Manual: `./trigger_agents.sh mid|strong|both` for one-shot trigger
   - `--mid-interval` / `--strong-interval` flags to override defaults
-- **Watchlist** (`WATCHLIST` env var, default: `NVDA,SNDK,SPY,QQQ`): strong-agent only evaluates tickers in this list
+- **Discovery scope** (`RESEARCH_CONTEXT`): original investment topics; entities emerge from evidence with no fixed portfolio or ticker restriction
 
 ### Infrastructure
 
@@ -183,6 +183,7 @@ Required secrets (set in `.env`):
 | `FINNHUB_API_KEY` | Optional | finnhub-ingestor       |
 | `POLYGON_API_KEY` | Optional | polygon-news-ingestor  |
 | `CARAVO_API_KEY`  | Optional | twitter-ingestor       |
-| `CLAUDE_AUTH_DIR` | Optional | mid-agent, strong-agent (Docker Claude auth) |
+| `CODEX_API_KEY` | Optional | Mid/Strong hosted model auth; alternatively log in through each container CLI |
 | `TWITTER_FOLLOW_USER` | Optional | twitter-ingestor (default: genhcnehcsi) |
-| `WATCHLIST`       | Optional | strong-agent (default: NVDA,SNDK,SPY,QQQ) |
+| `RESEARCH_CONTEXT` | Optional | Original topic interests, not a ticker allowlist |
+| `CODEX_MODEL` / role overrides | Optional | Account-available model selection |

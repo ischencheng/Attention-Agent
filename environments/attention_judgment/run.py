@@ -181,8 +181,8 @@ def cycle(args, ledger):
     # This is controlled I/O, not a hostile-code security sandbox.
     with tempfile.TemporaryDirectory(prefix="attention-candidate-") as work:
         output = run(prompt, SCHEMA, work, run_dir / "codex", args.timeout, model=args.model, sandbox="read-only", codex_bin=args.codex_bin)
-    tool_types = {"command_execution", "mcp_tool_call", "web_search", "file_change", "collab_tool_call"}
-    if any(e.get("item", {}).get("type") in tool_types for e in output["events"]):
+    allowed_items = {"agent_message", "reasoning", "todo_list"}
+    if any("item" in e and e["item"].get("type") not in allowed_items for e in output["events"]):
         raise ValueError("candidate used tools outside the frozen observation protocol; result rejected")
     metadata = {"usage": output["usage"], "output_dir": str(run_dir / "codex"), "requested_model": args.model, "cli_version": output.get("cli_version"),
                 "prompt_sha256": digest(prompt), "schema_sha256": digest(SCHEMA)}

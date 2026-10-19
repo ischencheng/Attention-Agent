@@ -1,0 +1,158 @@
+{
+  "date": "2026-10-19",
+  "runtime": {
+    "python": "3.12.13",
+    "codex_cli": "0.163.0",
+    "requested_model": "gpt-6.1-sol"
+  },
+  "software_tests": {
+    "judgment_market_export_replay": 63,
+    "codex_adapter_and_scheduler": 15,
+    "provenance_reference": 100,
+    "provenance_baseline": 0,
+    "provenance_mutants_rejected": 6
+  },
+  "synthetic_runs": [
+    {
+      "run": "synthetic-versioned-01",
+      "passed": false,
+      "checks_passed": 7,
+      "checks_total": 14,
+      "grade_sha256": "0c0b52053f1465891cc9a57992799e1c782dcc53fdf8c3cf6eea2ed93e10c61e",
+      "usage": {
+        "input_tokens": 97997,
+        "cached_input_tokens": 18432,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 3087,
+        "reasoning_output_tokens": 0
+      }
+    },
+    {
+      "run": "synthetic-versioned-02",
+      "passed": true,
+      "checks_passed": 14,
+      "checks_total": 14,
+      "grade_sha256": "efcac496a20ffcdbf8a95233ec76158914d6743c07b25766a8b997b68650b0c4",
+      "usage": {
+        "input_tokens": 100402,
+        "cached_input_tokens": 18432,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 2533,
+        "reasoning_output_tokens": 0
+      }
+    }
+  ],
+  "forward": {
+    "originals": 22,
+    "judgments": [
+      {
+        "hash": "6e5fde3977aa8c9386ee9341d01df33526770b014b088927dca7abe000600d5b",
+        "thesis_id": "nvidia-local-agent-platform-20261019",
+        "title": "本地代理计算进入软硬件同步交付阶段",
+        "stance": "research",
+        "frozen_at": "2026-10-19T04:31:00.703926+00:00",
+        "dates": {
+          "day": "2026-10-19",
+          "entry": "2026-10-19",
+          "month": "2026-10-30",
+          "week": "2026-10-23"
+        },
+        "forecasts": 0,
+        "runner": {
+          "output_dir": "/Users/AndrewCheng/Project/AI_Infra/Attention-Agent/environments/attention_judgment/runs/paper/attempts/20261019T043035-d0659fab/codex",
+          "prompt_sha256": "1be4a60f96e88f1669daf09c225c4a3975321fb5397b596eab97fd668ce295e0",
+          "requested_model": "gpt-6.1-sol",
+          "schema_sha256": "5694d15862f612815851308c43df9a943bdfa9f708797d28fb24db317d7708d6",
+          "usage": {
+            "cache_write_input_tokens": 0,
+            "cached_input_tokens": 0,
+            "input_tokens": 40958,
+            "output_tokens": 1113,
+            "reasoning_output_tokens": 89
+          }
+        }
+      },
+      {
+        "hash": "43c27d2779e0c4433ac5835e223e97ec6d7b3734713443836222eae325aa22d8",
+        "thesis_id": "nordic-ai-infrastructure-delivery-20261019",
+        "title": "北欧AI基础设施出现具体部署，规划容量仍待兑现",
+        "stance": "research",
+        "frozen_at": "2026-10-19T04:35:21.481444+00:00",
+        "dates": {
+          "day": "2026-10-19",
+          "entry": "2026-10-19",
+          "month": "2026-10-30",
+          "week": "2026-10-23"
+        },
+        "forecasts": 0,
+        "runner": {
+          "cli_version": "codex-cli 0.163.0",
+          "output_dir": "/Users/AndrewCheng/Project/AI_Infra/Attention-Agent/environments/attention_judgment/runs/paper/attempts/20261019T043500-a2fad14d/codex",
+          "prompt_sha256": "1f8bf286e657d5e8f6aa2910f91620f6c04149ccb7d4d64ca8e8d1eb07c73b66",
+          "requested_model": "gpt-6.1-sol",
+          "schema_sha256": "5694d15862f612815851308c43df9a943bdfa9f708797d28fb24db317d7708d6",
+          "usage": {
+            "cache_write_input_tokens": 0,
+            "cached_input_tokens": 0,
+            "input_tokens": 42881,
+            "output_tokens": 875,
+            "reasoning_output_tokens": 39
+          }
+        }
+      }
+    ],
+    "resolved_price_observations": 0,
+    "predeclared_price_forecasts": 0,
+    "source_coverage": "Federal Reserve, NVIDIA, AMD, OpenAI primary RSS; bounded pilot, not full original stream"
+  },
+  "market_smoke": {
+    "evaluation": {
+      "symbol": "MSFT",
+      "benchmark": "SPY",
+      "entry": "2025-11-24",
+      "exit": "2025-11-28",
+      "return_basis": "entry_open_to_exit_close_price_only",
+      "dividends_included": false,
+      "drawdown_basis": "entry_open_then_completed_daily_closes_only",
+      "data_vintages": [
+        {
+          "symbol": "MSFT",
+          "source": "Yahoo Finance chart API",
+          "fetched_at": "2026-10-19T04:27:42.843338+00:00",
+          "as_of": "2025-11-29T00:00:00+00:00",
+          "snapshot_sha256": "807597b86e766a89e380af0580425213137d56aa6cb30ee3e16428ebbdca7866"
+        },
+        {
+          "symbol": "SPY",
+          "source": "Yahoo Finance chart API",
+          "fetched_at": "2026-10-19T04:27:42.985482+00:00",
+          "as_of": "2025-11-29T00:00:00+00:00",
+          "snapshot_sha256": "d701f8a1d38cd47bd132fc5354de6da626ef0c1773672784834da31994635a9b"
+        }
+      ],
+      "status": "resolved",
+      "symbol_return": 0.03581054687500007,
+      "benchmark_return": 0.03123634298204392,
+      "excess_return": 0.004574203892956152,
+      "max_close_drawdown": 0.002105263157894721,
+      "worst_close_return": -0.002105263157894721,
+      "benchmark_max_close_drawdown": 0.0,
+      "benchmark_worst_close_return": 0.0
+    },
+    "artifact_sha256": "126013a1acce8883ab4ba76b3410683fbbdf342942f020df420fd59dea8d10ee",
+    "purpose": "real historical data integration only, not a model prediction or strategy"
+  },
+  "automation": {
+    "id": "attention-proxy",
+    "schedule": "weekdays 16:35 America/New_York",
+    "environment": "local Codex heartbeat"
+  },
+  "limitations": [
+    "Docker images and full Kafka/Flink deployment not run",
+    "No-memory and append-only-summary model controls not measured",
+    "No matured forward prediction or proven investment advantage",
+    "Fundamental thesis correctness requires independent evidence review",
+    "One synthetic fixture is not held-out generalization",
+    "First synthetic run retained after document-level validator false rejection"
+  ]
+}
