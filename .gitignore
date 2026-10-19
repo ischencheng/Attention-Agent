@@ -35,3 +35,4 @@ ts-agents/dist/
 ts-agents/node_modules/
 package-lock.json
 ts-agents/package-lock.json
+frontend-react/dist/

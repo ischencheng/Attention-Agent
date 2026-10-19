@@ -19,6 +19,12 @@ Mid/Strong and production-result evaluation. The dashboard exposes each stage
 and the agents' last saved state. Merely starting idle agent containers is not
 an agent schedule.
 
+The dashboard's **Decision trace** connects original sources, recorded routing
+reasons, Mid annotations and Strong research. Inspect current judgments, revision
+history, independently frozen versions and recorded agent cycles separately.
+[Trace design and book references](TRACE_DESIGN.md) explain the evidence contract,
+deployment and the specific ideas adopted from AI Agent Book.
+
 ## Continuing judgment and delayed evaluation
 
 The [Attention Judgment environment](environments/attention_judgment/README.md)

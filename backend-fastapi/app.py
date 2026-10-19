@@ -22,6 +22,7 @@ from starlette.responses import Response
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.append(str(Path(__file__).resolve().parent.parent / "skills"))
 from evidence import verify_evidence
+from trace_api import cycle_list, research_detail, research_list, routing_list, trace_detail
 
 
 LOGGER = logging.getLogger("backend-fastapi")
@@ -382,6 +383,43 @@ async def api_feed(limit: int = Query(default=50, ge=1, le=200)) -> dict[str, An
     API_REQUESTS.labels("/api/feed").inc()
     rows = await db_call(query_feed, limit)
     return {"items": rows, "count": len(rows)}
+
+
+@app.get("/api/research")
+async def api_research(limit: int = Query(default=50, ge=1, le=100)) -> dict[str, Any]:
+    return await db_call(research_list, get_conn, limit)
+
+
+@app.get("/api/research/detail")
+async def api_research_detail(agent_id: str = Query(max_length=100),
+                              thesis_id: str = Query(max_length=300)) -> Any:
+    result = await db_call(research_detail, get_conn, agent_id, thesis_id)
+    if result is None:
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=404, content={"detail": "not found"})
+    return result
+
+
+@app.get("/api/traces/{kind}/{record_id}")
+async def api_trace(kind: str, record_id: int) -> Any:
+    if kind not in {"raw", "ticket", "annotation", "decision"} or record_id <= 0:
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=400, content={"detail": "unsupported record reference"})
+    result = await db_call(trace_detail, get_conn, kind, record_id)
+    if result is None:
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=404, content={"detail": "not found"})
+    return result
+
+
+@app.get("/api/cycles")
+async def api_cycles(limit: int = Query(default=30, ge=1, le=100)) -> dict[str, Any]:
+    return await db_call(cycle_list, limit)
+
+
+@app.get("/api/routing")
+async def api_routing(limit: int = Query(default=20, ge=1, le=100)) -> dict[str, Any]:
+    return await db_call(routing_list, get_conn, limit)
 
 
 @app.get("/api/decisions")

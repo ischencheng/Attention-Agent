@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import TraceExplorer, { HistoricalEvidence } from "./TraceExplorer";
 
 const apiBase = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
 
@@ -81,6 +82,7 @@ function ClusterBadge({ type }) {
 function AnnotationCard({ row }) {
   const [expanded, setExpanded] = useState(false);
   const [tickets, setTickets] = useState(null);
+  const [ticketError, setTicketError] = useState(null);
   const p = row.payload || {};
   const ticketIds = p.attention_ticket_ids || (p.attention_ticket_id ? [p.attention_ticket_id] : []);
   const hasTickets = ticketIds.length > 0;
@@ -93,10 +95,12 @@ function AnnotationCard({ row }) {
     setExpanded(next);
     if (next && tickets === null && hasTickets) {
       try {
+        setTicketError(null);
         const res = await fetch(buildApiUrl(`/api/tickets/by-ids?ids=${ticketIds.join(",")}`));
+        if (!res.ok) throw new Error(`Request failed (${res.status})`);
         const data = await res.json();
         setTickets(data.items || []);
-      } catch { /* ignore */ }
+      } catch (error) { setTicketError(error.message); }
     }
   }
 
@@ -134,7 +138,7 @@ function AnnotationCard({ row }) {
       </div>
       {expanded && (
         <div className="drill-down">
-          {tickets === null
+          {ticketError ? <p className="trace-error">Ticket lookup unavailable: {ticketError}. Collapse and reopen to retry.</p> : tickets === null
             ? <p className="muted">Loading...</p>
             : tickets.length === 0
               ? <p className="muted">No tickets found</p>
@@ -148,30 +152,32 @@ function AnnotationCard({ row }) {
 
 function DecisionCard({ row }) {
   const [expanded, setExpanded] = useState(false);
-  const [relatedAnnotations, setRelatedAnnotations] = useState(null);
+  const [evidence, setEvidence] = useState(null);
+  const [evidenceError, setEvidenceError] = useState(null);
   const p = row.payload || {};
   const actions = p.actions || [];
-  const annotationIds = p.related_annotations || [];
 
   async function handleToggle() {
     const next = !expanded;
     setExpanded(next);
-    if (next && relatedAnnotations === null && annotationIds.length > 0) {
+    if (next && evidence === null) {
       try {
-        const res = await fetch(buildApiUrl(`/api/annotations/by-ids?ids=${annotationIds.join(",")}`));
+        setEvidenceError(null);
+        const res = await fetch(buildApiUrl(`/api/decisions/${row.id}/evidence`));
+        if (!res.ok) throw new Error(`Request failed (${res.status})`);
         const data = await res.json();
-        setRelatedAnnotations(data.items || []);
-      } catch { /* ignore */ }
+        setEvidence(data);
+      } catch (error) { setEvidenceError(error.message); }
     }
   }
 
   return (
     <article className="feed-card decision-card">
-      <div className={`card-header ${annotationIds.length > 0 ? "card-toggle" : ""}`} onClick={annotationIds.length > 0 ? handleToggle : undefined}>
+      <div className="card-header">
         <span className="card-type decision-type">DECISION</span>
         <UrgencyBadge urgency={p.priority} />
         <span className="muted">{fmtTime(row.created_at)}</span>
-        {annotationIds.length > 0 && <span className={`expand-indicator ${expanded ? "open" : ""}`}>&#9654;</span>}
+        <button className="evidence-toggle" onClick={handleToggle} aria-expanded={expanded}>{expanded ? "Hide evidence" : "Verify historical evidence"}</button>
       </div>
       <h3>{p.title || p.decision_type || "Decision Packet"}</h3>
       <p>{p.summary || "-"}</p>
@@ -195,11 +201,9 @@ function DecisionCard({ row }) {
       </div>
       {expanded && (
         <div className="drill-down">
-          {relatedAnnotations === null
+          {evidenceError ? <p className="trace-error">Evidence verification unavailable: {evidenceError}. Collapse and reopen to retry.</p> : evidence === null
             ? <p className="muted">Loading...</p>
-            : relatedAnnotations.length === 0
-              ? <p className="muted">No related annotations found</p>
-              : relatedAnnotations.map((a) => <AnnotationCard key={a.id} row={a} />)
+            : <HistoricalEvidence evidence={evidence} />
           }
         </div>
       )}
@@ -268,10 +272,22 @@ export default function App() {
   return (
     <main className="container">
       <header className="header">
-        <h1>AI Attention Proxy</h1>
-        <p>Multi-source intelligence pipeline</p>
+        <div><span className="eyebrow">A continuing research system</span><h1>AI Attention Proxy</h1>
+        <p>Discover signals. Accumulate evidence. Revisit judgments.</p></div>
+        <span className={`live-indicator status-${wsState}`}><span />{`Feed ${wsState}`}</span>
       </header>
 
+      <section className="pipeline-summary" aria-label="Pipeline snapshot">
+        {[["Raw records", "raw_count"], ["Tickets", "ticket_count"], ["Annotations", "annotation_count"], ["Decisions", "decision_count"]].map(([label, key]) => <div key={key}><strong>{overview[key] == null ? "—" : overview[key].toLocaleString()}</strong><span>{label}</span></div>)}
+        <div><strong>{agents.find((agent) => agent.role === "mid")?.pending_theme_count ?? "—"}</strong><span>Pending themes</span></div>
+        <div><strong>{agents.find((agent) => agent.role === "strong")?.thesis_count ?? "—"}</strong><span>Theses</span></div>
+      </section>
+      {dataState === "error" && <p className="trace-error" role="status">Pipeline counts are unavailable. Showing the last received snapshot.</p>}
+
+      <TraceExplorer />
+
+      <details className="pipeline-overview">
+      <summary>Pipeline overview · sources, delivery counts, and saved agent state</summary>
       <section className="cards">
         <article className="card">
           <h3>Live Feed</h3>
@@ -314,9 +330,10 @@ export default function App() {
           );
         })}
       </section>
+      </details>
 
       <section className="feed-section">
-        <h2>Activity Feed</h2>
+        <div className="section-heading"><div><span className="eyebrow">Published records</span><h2>Activity feed</h2></div></div>
         <div className="feed-list">
           {feed.map((item) => (
             <FeedItem key={`${item.item_type}-${item.id}`} item={item} />

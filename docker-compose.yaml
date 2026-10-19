@@ -684,11 +684,18 @@ services:
       DB_PASSWORD: bluesky
       CORS_ORIGINS: "*"
       WS_POLL_INTERVAL_SECONDS: "1.0"
+      ATTENTION_PRODUCTION_LEDGER: /runtime/production/trace-projection.sqlite3
+      ATTENTION_CYCLE_AUDIT_DIR: /runtime/cycle-audit
+      ATTENTION_LEGACY_CYCLE_DIR: /runtime/legacy-cycles
       LOG_LEVEL: INFO
       OTEL_SERVICE_NAME: backend-fastapi
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - ./environments/attention_judgment/runs/production:/runtime/production:ro
+      - ./environments/attention_judgment/runs/local-pipeline/cycle-audit:/runtime/cycle-audit:ro
+      - ./environments/attention_judgment/runs/local-pipeline/legacy-cycle-summaries:/runtime/legacy-cycles:ro
     restart: unless-stopped
     depends_on:
       postgres:
@@ -734,7 +741,7 @@ services:
       VITE_WS_URL: ""
       VITE_PROXY_TARGET: http://backend-fastapi:8000
     ports:
-      - "5173:5173"
+      - "127.0.0.1:5173:5173"
     restart: unless-stopped
     depends_on:
       - backend-fastapi
