@@ -48,12 +48,14 @@ class CycleAuditTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             events = [{"type": "item.started", "item": {"id": "item_1", "type": "command_execution", "command": "python /app/skills/db_query.py 'secret SQL'", "status": "in_progress"}},
                       {"type": "item.completed", "item": {"id": "item_1", "type": "command_execution", "command": "python /app/skills/db_query.py 'secret SQL'", "aggregated_output": "private result", "exit_code": 0, "status": "completed"}},
-                      {"type": "item.completed", "item": {"id": "item_2", "type": "agent_message", "text": "private model transcript"}}]
+                      {"type": "item.completed", "item": {"id": "item_2", "type": "agent_message", "text": "private model transcript"}},
+                      {"type": "item.completed", "item": {"id": "item_3", "type": "command_execution", "command": "python /app/skills/source_context.py 'private arguments'", "aggregated_output": "private context", "exit_code": 0, "status": "completed"}}]
             (Path(folder) / "events.jsonl").write_text("\n".join(json.dumps(item) for item in events))
             result = tool_events(folder)
-            self.assertEqual(result["tool_event_count"], 2)
+            self.assertEqual(result["tool_event_count"], 3)
             self.assertEqual(result["tool_events"][1]["tool_names"], ["db_query.py"])
             self.assertEqual(result["tool_events"][1]["exit_code"], 0)
+            self.assertEqual(result["tool_events"][2]["tool_names"], ["source_context.py"])
             self.assertNotIn("secret SQL", json.dumps(result))
             self.assertNotIn("private", json.dumps(result))
             self.assertIsNone(result["tool_events"][1]["timestamp"])

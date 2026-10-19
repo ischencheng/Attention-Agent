@@ -6,6 +6,10 @@ source. Follow the role and persistent-state key in the cycle prompt.
 
 ## Product contract
 
+The core product delegates information consumption, filters noise and protects
+human attention. This deployment uses investment research as a downstream task;
+its existing topics and evaluation rules still apply.
+
 Fast routes attention without replacing source material with a premature
 summary. Mid organizes evidence. Strong develops and revises judgments against
 the originals. A summary is a navigation aid, never an authoritative original.
@@ -48,6 +52,20 @@ original cannot be resolved, record the blocker and do not publish a decision
 that treats the enriched ticket text as verified evidence. `db_write.py`
 performs authoritative snapshot validation; never supply `evidence_snapshot`
 yourself or bypass that skill with direct inserts.
+
+When a reply needs its surrounding context, retrieve the locally recorded
+ancestors from an identified original:
+
+```bash
+python /app/skills/source_context.py '{"raw_id":123,"limit":30}'
+```
+
+This follows native Twitter reply references in stored originals. It does not
+fetch a complete platform thread. Read the coverage, missing references and
+truncation indicators; a missing parent is unresolved context. Native source
+time differs from ingestion time. Newly retrieved context is not automatically
+evidence for an earlier decision. If a contextual original supports a new
+claim, cite that original through the normal annotation and snapshot contracts.
 
 Use available search tools only when they are actually present. Do not claim
 that a web search, source read or framework call happened unless its tool result

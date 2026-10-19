@@ -5,6 +5,11 @@ through routing, factual annotation and continuing judgment. It explains what th
 system recorded, why it advanced or withheld an item, and what remains unresolved.
 It does not reconstruct private model reasoning.
 
+This serves the [product's information-consumption contract](PRODUCT.md): let a
+person or downstream agent trace useful context back to its sources. Investment
+research supplies the current examples and outcome evaluator. Runtime events
+and infrastructure health remain separate from the business evidence path.
+
 ## Design references and project choices
 
 The relevant sections of [AI Agent Book](https://github.com/bojieli/ai-agent-book)
@@ -44,6 +49,19 @@ time remain distinct. Routing records preserve the actual concise reason and
 coverage metadata when available. Older missing reasons are not backfilled with
 new explanations. No synthetic success label, market prediction or trade is
 created to complete an otherwise empty stage.
+
+The source-context view is a separate, read-only lookup anchored to an original
+record. It follows recorded native Twitter reply ancestors within the same source
+namespace and validates the native identity of each stored candidate. Returned
+records are locally collected context; missing parents, multiple stored versions,
+cycles and retrieval limits remain explicit. It does not infer a thread from
+author names or adjacent timestamps. Native event time comes from the provider's
+original fields, never from an ingestion-time fallback.
+
+Context retrieved now is not added to an earlier decision's frozen evidence and
+does not establish which messages the deciding agent read. The current adapter
+covers stored Twitter reply ancestors. Complete thread crawling and bounded
+chat-history retrieval require separate source support and are not implemented.
 
 Only structured application events, summaries and source records enter the
 explorer. Gateway tokens, API keys and private raw runtime transcripts are outside

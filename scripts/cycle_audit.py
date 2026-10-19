@@ -56,7 +56,7 @@ def tool_events(output_dir):
     path = Path(output_dir) / "events.jsonl"
     if not path.is_file():
         return result
-    allowed = {"db_query.py", "db_write.py", "research_sources.py", "mrbrain_invest.py", "recall.py"}
+    allowed = {"db_query.py", "db_write.py", "research_sources.py", "source_context.py", "mrbrain_invest.py", "recall.py"}
     try:
         with path.open() as stream:
             for index, line in enumerate(stream):

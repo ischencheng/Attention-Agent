@@ -2,6 +2,14 @@ export function asArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
+export function rawRecordId(row = {}) {
+  const id = row.record_id ?? row.id;
+  if (Number.isSafeInteger(id) && id > 0) return id;
+  const match = typeof id === "string" && id.match(/^raw:([1-9]\d*)$/);
+  if (match && Number.isSafeInteger(Number(match[1]))) return Number(match[1]);
+  return null;
+}
+
 export function readable(value, fallback = "Not recorded") {
   if (value == null || value === "") return fallback;
   if (typeof value === "string") return value;

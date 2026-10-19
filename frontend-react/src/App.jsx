@@ -272,8 +272,8 @@ export default function App() {
   return (
     <main className="container">
       <header className="header">
-        <div><span className="eyebrow">A continuing research system</span><h1>AI Attention Proxy</h1>
-        <p>Discover signals. Accumulate evidence. Revisit judgments.</p></div>
+        <div><span className="eyebrow">Delegated information consumption</span><h1>AI Attention Proxy</h1>
+        <p>Filter noise. Build context. Preserve the evidence.</p></div>
         <span className={`live-indicator status-${wsState}`}><span />{`Feed ${wsState}`}</span>
       </header>
 
