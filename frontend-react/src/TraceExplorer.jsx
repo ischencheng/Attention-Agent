@@ -1,5 +1,6 @@
 import { useEffect, useId, useMemo, useState } from "react";
 import RecordedConversation from "./RecordedConversation";
+import ObservabilityPanel, { AuditTraceLink } from "./ObservabilityPanel";
 import { asArray, classificationPresentation, evidenceLabel, graphNodes, isInputRelay, lastRevision, rawRecordId, readable, recordKey, researchTitle,
   routingDisposition, routingGroups, routingStageLabel, sourceText, sourceTimes, sourceUrl, ticketClassifications, traceStages } from "./traceModel.js";
 
@@ -80,6 +81,7 @@ function RoutingRecord({ node }) {
       ["Source ID", payload.source_id], ["Input payload hash", payload.input_payload_sha256], ["Original raw hash", payload.raw_sha256],
       ["Runtime trace ID", node.runtime_trace_id || payload.runtime_trace_id],
       ["Runtime trace coverage", humanize(node.runtime_trace_status || payload.runtime_trace_status)]]} />
+    <AuditTraceLink record={node} />
     <ClassificationUsage display={display} />
   </article>;
 }
@@ -237,6 +239,7 @@ function CycleActivity({ data, error }) {
       <div><span className="trace-pill">{humanize(cycle.role)}</span><strong>{humanize(cycle.status)}</strong><time>{formatTime(cycle.completed_at || cycle.failed_at || cycle.started_at)}</time></div>
       <p>{cycle.summary || (cycle.error_type ? `Cycle failed: ${cycle.error_type}` : "Summary not recorded")}</p>
       <p className="muted">Selected: {asArray(cycle.selected_input_ids).join(", ") || "none"} · Reviewed: {asArray(cycle.reviewed_input_ids).join(", ") || "none"} · State save: {cycle.state_verified === true ? "verified" : "not verified"}</p>
+      <AuditTraceLink record={cycle} />
       {cycle.usage && <details className="cycle-usage"><summary>Reported usage</summary><Metadata values={Object.entries(cycle.usage).map(([key, value]) => [humanize(key), value])} /></details>}
       <details className="cycle-usage"><summary>Tool execution events · {cycle.tool_event_count ?? asArray(cycle.tool_events).length}</summary>
         {asArray(cycle.tool_events).length ? <><p className="muted">Recorded tool names and completion statuses. Per-tool timing was not recorded.</p><ol className="tool-event-list">{cycle.tool_events.map((event, eventIndex) => <li key={`${event.item_id}-${eventIndex}`}><code>{asArray(event.tool_names).join(", ") || event.type || "Tool"}</code><span>{humanize(event.status || event.event)}</span>{event.exit_code != null && <span>exit {event.exit_code}</span>}</li>)}</ol></> : <p className="muted">Tool events were not recorded for this summary.</p>}
@@ -336,7 +339,7 @@ function RoutingActivity({ refresh }) {
       </button>)}</div>
       <div className="routing-detail">
         <div className="trace-record-heading"><strong>Recorded routing attempts</strong><span className="trace-pill">{selected.raw_message_id ? `Original #${selected.raw_message_id}` : "Original unresolved"}</span></div>
-        {!selected.raw_message_id ? <><p className="trace-empty">No matching original could be resolved by source identity and raw hash. These recorded attempts are shown without an inferred evidence link.</p>{selected.events.map((event) => <RoutingRecord key={event.id} node={{ id: event.id, payload: event.payload, timestamp: event.created_at }} />)}</>
+        {!selected.raw_message_id ? <><p className="trace-empty">No matching original could be resolved by source identity and raw hash. These recorded attempts are shown without an inferred evidence link.</p>{selected.events.map((event) => <RoutingRecord key={event.id} node={{ ...event, timestamp: event.created_at }} />)}</>
           : loadedKey !== identity ? <p className="trace-empty" role="status">Loading this original’s routing path…</p>
           : graphError ? <p className="trace-error" role="status">Routing trace unavailable: {graphError}. Use Refresh to retry.</p>
           : <>
@@ -433,6 +436,7 @@ export default function TraceExplorer() {
         </div>
       </>}
     </div></div>
+    <ObservabilityPanel refresh={refresh} />
     <RoutingActivity refresh={refresh} />
     <CycleActivity data={cycles} error={cycleError} />
   </section>;
