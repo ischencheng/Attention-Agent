@@ -587,7 +587,7 @@ services:
       context: ./agent
       dockerfile: Dockerfile
       args:
-        CODEX_CLI_VERSION: "${CODEX_CLI_VERSION:-0.137.0}"
+        CODEX_CLI_VERSION: "${CODEX_CLI_VERSION:-0.163.0}"
     container_name: mid-agent
     hostname: mid-agent
     networks: [backend]
@@ -622,7 +622,7 @@ services:
       context: ./agent
       dockerfile: Dockerfile
       args:
-        CODEX_CLI_VERSION: "${CODEX_CLI_VERSION:-0.137.0}"
+        CODEX_CLI_VERSION: "${CODEX_CLI_VERSION:-0.163.0}"
     container_name: strong-agent
     hostname: strong-agent
     networks: [backend]

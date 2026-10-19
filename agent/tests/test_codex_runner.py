@@ -27,6 +27,9 @@ import sys
 import time
 
 args = sys.argv[1:]
+if args == ["--version"]:
+    print("codex-cli 0.163.0 (offline fake)")
+    sys.exit(0)
 assert args[0] == "exec"
 assert "--json" in args and "--output-schema" in args and "--ephemeral" in args
 assert "--ignore-user-config" in args and "--skip-git-repo-check" in args
@@ -70,12 +73,15 @@ class RunnerTests(unittest.TestCase):
         prompt = "Literal prompt: `echo no` $(echo no) 中文"
         result = self.invoke(prompt, model="test-model")
         self.assertEqual(result["final"], {"value": 7})
+        self.assertEqual(result["cli_version"], "codex-cli 0.163.0 (offline fake)")
         self.assertEqual(result["usage"], {"input_tokens": 12, "cached_input_tokens": 3, "output_tokens": 4})
         observed = json.loads((self.root / "run/observed.json").read_text())
         self.assertEqual(observed["prompt"], prompt)
         self.assertIn("test-model", observed["args"])
         self.assertNotIn("sandbox_workspace_write.network_access=true", observed["args"])
-        self.assertTrue(json.loads((self.root / "run/run.json").read_text())["success"])
+        report = json.loads((self.root / "run/run.json").read_text())
+        self.assertTrue(report["success"])
+        self.assertEqual(report["cli_version"], result["cli_version"])
 
     def test_network_is_explicit_and_uses_sandbox_config(self):
         self.invoke(network_access=True)

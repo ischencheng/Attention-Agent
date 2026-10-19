@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Run the open-source Codex CLI with a structured final answer and saved events.
 
-No model is called on import. ``run`` is also the reusable adapter for local
+The CLI flag contract is checked against Codex 0.163.0. No model is called on
+import. ``run`` is also the reusable adapter for local
 evaluation harnesses; its caller owns prompts, schemas, and business validation.
 """
 from __future__ import annotations
@@ -108,7 +109,7 @@ def run(prompt, schema, cwd, output_dir, timeout, model=None, *,
         "command": command, "cwd": str(cwd), "output_dir": str(output_dir),
         "model": model, "timeout_seconds": timeout, "sandbox": sandbox,
         "network_access": bool(network_access), "success": False,
-        "returncode": None, "usage": None,
+        "returncode": None, "usage": None, "cli_version": None,
     }
     events = []
     try:
@@ -117,13 +118,27 @@ def run(prompt, schema, cwd, output_dir, timeout, model=None, *,
         # Remove only that empty value so saved CLI login remains usable.
         if env.get("CODEX_API_KEY") == "":
             env.pop("CODEX_API_KEY")
+        # --version is a local metadata query, not a model/authentication call.
+        # Its stderr is deliberately not copied into logs or raised exceptions.
+        try:
+            version = subprocess.run(
+                [str(codex_bin), "--version"], cwd=cwd, env=env, text=True,
+                capture_output=True, timeout=min(5, timeout), check=False,
+            )
+            if version.returncode == 0 and version.stdout.strip():
+                metadata["cli_version"] = version.stdout.strip()[:200]
+        except (OSError, subprocess.TimeoutExpired):
+            pass  # Optional telemetry must not change the execution contract.
+        remaining = timeout - (time.monotonic() - started)
+        if remaining <= 0:
+            raise CodexRunError(f"Codex exceeded its {timeout}s run budget during version discovery", output_dir)
         with (output_dir / "events.jsonl").open("w") as stdout, (output_dir / "stderr.log").open("w") as stderr:
             process = subprocess.Popen(
                 command, stdin=subprocess.PIPE, stdout=stdout, stderr=stderr,
                 text=True, cwd=cwd, env=env, start_new_session=os.name == "posix",
             )
             try:
-                process.communicate(prompt, timeout=timeout)
+                process.communicate(prompt, timeout=remaining)
             except (subprocess.TimeoutExpired, KeyboardInterrupt):
                 _stop_process(process)
                 metadata["returncode"] = process.returncode
@@ -162,6 +177,7 @@ def run(prompt, schema, cwd, output_dir, timeout, model=None, *,
             raise CodexRunError(f"Invalid final structured output: {exc}", output_dir, process.returncode) from exc
         metadata["success"] = True
         return {"final": final, "events": events, "usage": metadata["usage"],
+                "cli_version": metadata["cli_version"],
                 "returncode": process.returncode, "output_dir": str(output_dir)}
     except CodexRunError as exc:
         metadata["error"] = str(exc)

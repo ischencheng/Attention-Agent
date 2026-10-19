@@ -287,6 +287,25 @@ class CycleAndSettlementTests(unittest.TestCase):
         self.assertEqual(stored[original["id"]], original)
         self.assertEqual(len(self.ledger.entries("judgment")), 1)
 
+    def test_bounded_context_preserves_backlog_and_retry_consumption(self):
+        import codex_runner
+        items = [observed(f"item-{i:03}", available_at=f"2025-06-03T18:{i:02}:00+00:00") for i in range(45)]
+        input_path = self.root / "bulk.jsonl"
+        input_path.write_text("\n".join(json.dumps(o) for o in items))
+        args = SimpleNamespace(input=input_path, fetch=False, as_of=None,
+                               run_root=self.root / "attempts", timeout=10, model=None, codex_bin="unused")
+        output = {"final": {"discoveries": [], "no_action_reason": "No material discovery."}, "events": [], "usage": {}}
+        with patch.object(codex_runner, "run", return_value=output), redirect_stdout(io.StringIO()):
+            runner.cycle(args, self.ledger)
+            self.assertEqual(len(self.ledger.entries("observation")), 45)
+            self.assertEqual(len(self.ledger.entries("cycle")[0]["payload"]["reviewed_observation_ids"]), 40)
+            runner.cycle(args, self.ledger)
+        cycles = self.ledger.entries("cycle")
+        self.assertEqual(len(cycles), 2)
+        reviewed = [r for c in cycles for r in c["payload"]["reviewed_observation_ids"]]
+        self.assertEqual(len(reviewed), 45)
+        self.assertEqual(len(set(reviewed)), 45)
+
     def test_passive_price_observations_are_not_prediction_success(self):
         self.freeze_symbol(forecast=False)
         self.settle_with({"status": "resolved", "excess_return": 0.2})

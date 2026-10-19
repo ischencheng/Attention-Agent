@@ -7,7 +7,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && ln -sf /usr/bin/python3 /usr/bin/python
 
 # Open-source Codex CLI; the selected hosted model is a separate service.
-ARG CODEX_CLI_VERSION=0.137.0
+ARG CODEX_CLI_VERSION=0.163.0
 RUN npm install -g @openai/codex@${CODEX_CLI_VERSION}
 
 # Install Python dependencies for skills
