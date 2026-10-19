@@ -5,6 +5,11 @@ through routing, factual annotation and continuing judgment. It explains what th
 system recorded, why it advanced or withheld an item, and what remains unresolved.
 It does not reconstruct private model reasoning.
 
+This serves the [product's information-consumption contract](PRODUCT.md): let a
+person or downstream agent trace useful context back to its sources. Investment
+research supplies the current examples and outcome evaluator. Runtime events
+and infrastructure health remain separate from the business evidence path.
+
 ## Design references and project choices
 
 The relevant sections of [AI Agent Book](https://github.com/bojieli/ai-agent-book)

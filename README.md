@@ -1,12 +1,17 @@
 # AI Attention Proxy
 
-An information-consumption pipeline that preserves original evidence while
-delegating attention routing, factual curation, and goal-specific decisions to
-different agents.
+Infrastructure for delegating information consumption to AI: filter noise,
+accumulate useful evidence across time and sources, and free human attention.
+Downstream agents consume the resulting context and can inspect the originals
+behind it. Investment research is the current downstream application.
 
 - **Fast:** route potentially valuable information without premature summaries.
 - **Mid:** organize facts and relationships beside the original material.
 - **Strong:** use the original evidence when making a decision.
+
+The product contract is [delegated information consumption](PRODUCT.md): preserve
+source context, reduce repeated reading, and let sufficient evidence determine
+whether a judgment is warranted.
 
 The existing stack connects multi-source ingestion, Kafka/Flink, LLM workers,
 PostgreSQL, FastAPI and a React dashboard. See [CLAUDE.md](CLAUDE.md) for the

@@ -6,6 +6,10 @@ source. Follow the role and persistent-state key in the cycle prompt.
 
 ## Product contract
 
+The core product delegates information consumption, filters noise and protects
+human attention. This deployment uses investment research as a downstream task;
+its existing topics and evaluation rules still apply.
+
 Fast routes attention without replacing source material with a premature
 summary. Mid organizes evidence. Strong develops and revises judgments against
 the originals. A summary is a navigation aid, never an authoritative original.
