@@ -5,10 +5,12 @@ No running agent, live feed, or Kafka broker is implied by these tests.
 from __future__ import annotations
 
 import copy
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 import sys
 import tempfile
+import threading
 import unittest
 from unittest.mock import patch
 
@@ -65,7 +67,9 @@ class Cursor:
 
     def execute(self, sql, args=()):
         self.conn.queries.append(sql)
-        if sql.startswith("SELECT id, payload FROM"):
+        if sql.startswith("SELECT agent_id, state, updated_at FROM"):
+            fields = ("agent_id", "state", "updated_at")
+        elif sql.startswith("SELECT id, payload FROM"):
             fields = ("id", "payload")
         elif sql.startswith("SELECT id, payload, raw FROM"):
             fields = ("id", "payload", "raw")
@@ -94,6 +98,7 @@ class Cursor:
 class Connection:
     def __init__(self):
         self.tables = fixture()
+        self.tables["agent_state"] = {}
         self.queries = []
         self.session = None
 
@@ -299,6 +304,122 @@ class BridgeTests(unittest.TestCase):
         self.assertAlmostEqual(pipeline.report(self.ledger)["mean_brier"], 0.0625)
 
 
+class ResearchStateTests(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.path = Path(self.directory.name) / "research.sqlite3"
+        self.ledger = Ledger(self.path)
+        self.row = {"agent_id": "claude-strong", "updated_at": INSERTED,
+                    "state": {"theses": {"capacity": {"status": "research_only", "claim": "Sensitive original research"}},
+                              "pending_themes": ["needs more evidence"], "unknown_fields": {"preserve": [1, False, None]}}}
+
+    def tearDown(self):
+        self.ledger.close()
+        self.directory.cleanup()
+
+    def freeze(self, now=NOW):
+        with patch.object(pipeline, "utcnow", return_value=now):
+            return pipeline.freeze_research_state(self.ledger, self.row)
+
+    def test_whole_state_is_frozen_but_report_returns_summary_only(self):
+        result = self.freeze()
+        entry = self.ledger.entries(pipeline.RESEARCH_KIND)[0]
+        self.assertEqual(entry["payload"]["state"], self.row["state"])
+        self.assertEqual(entry["payload"]["state_sha256"], digest(self.row["state"]))
+        self.assertEqual(entry["payload"]["updated_at"], INSERTED.isoformat())
+        self.assertEqual(entry["payload"]["frozen_at"], NOW)
+        self.assertEqual(entry["payload"]["evaluation_status"], "unscored_application_research")
+        self.assertEqual(result["thesis_count"], 1)
+        report = pipeline.report(self.ledger)
+        self.assertEqual(report["research_state_agents"], 1)
+        self.assertEqual(report["research_state_versions"], 1)
+        self.assertEqual(report["latest_research_states"][0]["pending_theme_count"], 1)
+        self.assertNotIn("state", report["latest_research_states"][0])
+        self.assertNotIn("Sensitive original research", str(report))
+        self.assertEqual(self.ledger.verify(), entry["hash"])
+
+    def test_identical_content_is_idempotent_after_restart_and_timestamp_update(self):
+        first = self.freeze()
+        self.ledger.close()
+        self.ledger = Ledger(self.path)
+        self.row["updated_at"] = timestamp("2025-06-03T17:00:00Z")
+        second = self.freeze(LATER)
+        self.assertEqual(second["status"], "unchanged")
+        self.assertEqual(second["hash"], first["hash"])
+        self.assertEqual(second["frozen_at"], NOW)
+        self.assertEqual(len(self.ledger.entries(pipeline.RESEARCH_KIND)), 1)
+
+    def test_mutation_and_reversion_append_versions_without_erasing_prior_reasoning(self):
+        original = copy.deepcopy(self.row["state"])
+        first = self.freeze()
+        self.row["state"]["theses"]["capacity"]["status"] = "invalidated"
+        second = self.freeze(LATER)
+        self.row["state"] = original
+        third = self.freeze("2025-06-05T18:00:00Z")
+        entries = self.ledger.entries(pipeline.RESEARCH_KIND)
+        self.assertEqual([e["payload"]["version"] for e in entries], [1, 2, 3])
+        self.assertEqual(entries[0]["payload"]["state"]["theses"]["capacity"]["status"], "research_only")
+        self.assertEqual(entries[1]["payload"]["previous_version_hash"], first["hash"])
+        self.assertEqual(entries[2]["payload"]["previous_version_hash"], second["hash"])
+        self.assertNotEqual(third["hash"], first["hash"])
+
+    def test_research_symbols_and_probabilities_never_create_predictions_or_prices(self):
+        self.row["state"].update({"symbol": "ABC", "forecasts": [
+            {"symbol": "ABC", "horizon": "day", "p_outperform_spy": 0.99, "reason": "Unpublished state"}]})
+        self.freeze()
+        with patch.object(pipeline, "fetch_prices") as fetch:
+            result = pipeline.settle(self.ledger, as_of="2025-07-01T18:00:00Z")
+        fetch.assert_not_called()
+        self.assertEqual(result, [])
+        report = pipeline.report(self.ledger)
+        self.assertEqual(report["decision_packets"], 0)
+        self.assertEqual(report["resolved_price_observations"], 0)
+        self.assertEqual(report["resolved_predeclared_forecasts"], 0)
+        self.assertIsNone(report["mean_brier"])
+        self.assertEqual(self.ledger.entries(pipeline.DECISION_KIND), [])
+
+    def test_older_observer_finishing_later_cannot_replace_newer_research(self):
+        older_snapshot = copy.deepcopy(self.row)
+        self.row["state"]["theses"]["capacity"]["status"] = "invalidated"
+        self.row["updated_at"] = timestamp("2025-06-04T17:00:00Z")
+        newer = self.freeze(LATER)
+        self.row = older_snapshot
+        with self.assertRaisesRegex(ValueError, "older than the latest"):
+            self.freeze("2025-06-05T18:00:00Z")
+        entries = self.ledger.entries(pipeline.RESEARCH_KIND)
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0]["payload"]["state"]["theses"]["capacity"]["status"], "invalidated")
+        self.assertEqual(pipeline.report(self.ledger)["latest_research_states"][0]["hash"], newer["hash"])
+
+    def test_unknown_mid_keys_future_times_and_nonobject_states_are_rejected(self):
+        self.row["agent_id"] = "claude-mid"
+        with self.assertRaisesRegex(ValueError, "Strong"):
+            self.freeze()
+        self.row["agent_id"] = "claude-strong"
+        self.row["updated_at"] = timestamp("2025-06-05T18:00:00Z")
+        with self.assertRaisesRegex(ValueError, "after observer"):
+            self.freeze()
+        self.row["updated_at"] = INSERTED
+        self.row["state"] = ["not an object"]
+        with self.assertRaisesRegex(ValueError, "JSON object"):
+            self.freeze()
+        self.assertEqual(self.ledger.entries(), [])
+
+    def test_sync_only_reads_known_strong_keys_and_configured_alias(self):
+        conn = Connection()
+        conn.tables["decision_packets"] = {}
+        for key in ("claude-strong", "codex-strong", "custom-researcher", "claude-mid", "unrelated-strong"):
+            conn.tables["agent_state"][key] = {**copy.deepcopy(self.row), "agent_id": key}
+        with patch.dict(pipeline.os.environ, {"STRONG_AGENT_ID": "custom-researcher"}), \
+                patch.object(pipeline, "utcnow", return_value=NOW):
+            result = pipeline.sync(conn, self.ledger)
+        self.assertEqual({entry["agent_id"] for entry in result["research_frozen"]},
+                         {"claude-strong", "codex-strong", "custom-researcher"})
+        self.assertEqual(result["research_rejected"], [])
+        self.assertEqual(result["frozen"], [])
+        self.assertEqual(conn.session, {"isolation_level": "REPEATABLE READ", "readonly": True})
+
+
 class TargetTests(unittest.TestCase):
     def test_multiple_explicit_instrument_formats_and_no_prose_inference(self):
         symbols, forecasts, errors = pipeline.evaluation_targets({
@@ -326,6 +447,89 @@ class TargetTests(unittest.TestCase):
 
 
 class PostgresBridgeTests(unittest.TestCase):
+    def test_concurrent_observers_lock_before_snapshot_even_when_content_reverts(self):
+        import pgserver
+        import psycopg2
+        from psycopg2.extras import Json
+
+        with tempfile.TemporaryDirectory(prefix="attention-observer-order-test-") as directory:
+            server = pgserver.get_server(Path(directory) / "postgres", cleanup_mode="stop")
+            ledger_path = Path(directory) / "production.sqlite3"
+            ledger = Ledger(ledger_path)
+            original = {"theses": {"capacity": {"status": "research_only"}}}
+            changed = {"theses": {"capacity": {"status": "invalidated"}}}
+            older_ready = threading.Event()
+            release_older = threading.Event()
+            newer_attempting = threading.Event()
+            newer_snapshot = threading.Event()
+            freeze = pipeline.freeze_research_state
+
+            def pause_older(observer_ledger, row, **kwargs):
+                if row["state"] == changed:
+                    older_ready.set()
+                    if not release_older.wait(10):
+                        raise RuntimeError("older observer was not released")
+                return freeze(observer_ledger, row, **kwargs)
+
+            def observe(role):
+                class ObservedCursor(psycopg2.extensions.cursor):
+                    def execute(self, sql, *args, **kwargs):
+                        result = super().execute(sql, *args, **kwargs)
+                        if role == "newer" and sql.startswith("SELECT id, payload, kafka_topic"):
+                            newer_snapshot.set()
+                        return result
+
+                observer_ledger = Ledger(ledger_path)
+                conn = psycopg2.connect(server.get_uri(), cursor_factory=ObservedCursor)
+                try:
+                    if role == "newer":
+                        newer_attempting.set()
+                    return pipeline.sync(conn, observer_ledger)
+                finally:
+                    conn.close()
+                    observer_ledger.close()
+
+            def update(state, updated_at):
+                with psycopg2.connect(server.get_uri()) as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("UPDATE agent_state SET state=%s,updated_at=%s WHERE agent_id='claude-strong'",
+                                    (Json(state), timestamp(updated_at)))
+
+            try:
+                with psycopg2.connect(server.get_uri()) as setup:
+                    with setup.cursor() as cur:
+                        cur.execute((pipeline.ROOT / "postgres/init/001_schema.sql").read_text())
+                        cur.execute("INSERT INTO agent_state(agent_id,state,updated_at) VALUES(%s,%s,%s)",
+                                    ("claude-strong", Json(original), INSERTED))
+                observe("initial")
+                update(changed, "2025-06-03T17:00:00Z")
+                with patch.object(pipeline, "freeze_research_state", side_effect=pause_older), \
+                        ThreadPoolExecutor(max_workers=2) as executor:
+                    older = executor.submit(observe, "older")
+                    try:
+                        self.assertTrue(older_ready.wait(5), "older observer did not read its snapshot")
+                        # A later A observation would deduplicate against the
+                        # initial A if it could overtake the paused B observer.
+                        update(original, "2025-06-04T17:00:00Z")
+                        newer = executor.submit(observe, "newer")
+                        self.assertTrue(newer_attempting.wait(5), "newer observer did not attempt sync")
+                        self.assertFalse(newer_snapshot.wait(0.25),
+                                         "newer observer acquired a snapshot before the older sync completed")
+                    finally:
+                        release_older.set()
+                    self.assertEqual(older.result(timeout=5)["research_rejected"], [])
+                    self.assertEqual(newer.result(timeout=5)["research_rejected"], [])
+                self.assertTrue(newer_snapshot.is_set())
+                entries = ledger.entries(pipeline.RESEARCH_KIND)
+                self.assertEqual([e["payload"]["state"] for e in entries], [original, changed, original])
+                self.assertEqual([e["payload"]["version"] for e in entries], [1, 2, 3])
+                self.assertEqual(pipeline.report(ledger)["latest_research_states"][0]["updated_at"],
+                                 "2025-06-04T17:00:00+00:00")
+            finally:
+                release_older.set()
+                ledger.close()
+                server.cleanup()
+
     def test_real_database_snapshot_and_restart_safe_versioning(self):
         import pgserver
         import psycopg2
@@ -375,6 +579,61 @@ class PostgresBridgeTests(unittest.TestCase):
                                  "Original interpretation")
                 self.assertEqual(frozen[0]["payload"]["dates"]["entry"], "2025-06-04")
                 self.assertEqual(frozen[1]["payload"]["dates"]["entry"], "2025-06-05")
+            finally:
+                if conn is not None:
+                    conn.close()
+                ledger.close()
+                server.cleanup()
+
+
+    def test_real_strong_state_without_decisions_is_frozen_and_mutations_versioned(self):
+        import pgserver
+        import psycopg2
+        from psycopg2.extras import Json
+
+        with tempfile.TemporaryDirectory(prefix="attention-research-test-") as directory:
+            server = pgserver.get_server(Path(directory) / "postgres", cleanup_mode="stop")
+            ledger_path = Path(directory) / "production.sqlite3"
+            ledger = Ledger(ledger_path)
+            conn = None
+            original = {"theses": {"capacity": {"status": "research_only", "claim": "Original reasoning"}}}
+            changed = {"theses": {"capacity": {"status": "weakened", "claim": "New counterevidence"}}}
+            try:
+                with psycopg2.connect(server.get_uri()) as setup:
+                    with setup.cursor() as cur:
+                        cur.execute((pipeline.ROOT / "postgres/init/001_schema.sql").read_text())
+                        for key in ("claude-mid", "claude-strong"):
+                            cur.execute("INSERT INTO agent_state(agent_id,state,updated_at) VALUES(%s,%s,%s)",
+                                        (key, Json(original), INSERTED))
+                conn = psycopg2.connect(server.get_uri())
+                with patch.object(pipeline, "utcnow", return_value=NOW):
+                    first = pipeline.sync(conn, ledger)
+                self.assertEqual(first["frozen"], [])
+                self.assertEqual(len(first["research_frozen"]), 1)
+                self.assertEqual(first["research_frozen"][0]["agent_id"], "claude-strong")
+                ledger.close()
+                ledger = Ledger(ledger_path)
+                with patch.object(pipeline, "utcnow", return_value=LATER):
+                    repeated = pipeline.sync(conn, ledger)
+                self.assertEqual(repeated["research_frozen"], [])
+                self.assertEqual(repeated["research_unchanged"], 1)
+                with psycopg2.connect(server.get_uri()) as editor:
+                    with editor.cursor() as cur:
+                        cur.execute("UPDATE agent_state SET state=%s,updated_at=%s WHERE agent_id='claude-strong'",
+                                    (Json(changed), timestamp("2025-06-04T20:00:00Z")))
+                with patch.object(pipeline, "utcnow", return_value="2025-06-05T18:00:00Z"):
+                    revised = pipeline.sync(conn, ledger)
+                self.assertEqual(revised["research_frozen"][0]["version"], 2)
+                entries = ledger.entries(pipeline.RESEARCH_KIND)
+                self.assertEqual(entries[0]["payload"]["state"], original)
+                self.assertEqual(entries[1]["payload"]["state"], changed)
+                self.assertEqual(entries[1]["payload"]["previous_version_hash"], entries[0]["hash"])
+                summary = pipeline.report(ledger)
+                self.assertEqual(summary["research_state_versions"], 2)
+                self.assertEqual(summary["latest_research_states"][0]["version"], 2)
+                self.assertEqual(summary["decision_packets"], 0)
+                self.assertEqual(summary["resolved_predeclared_forecasts"], 0)
+                self.assertIsNone(summary["mean_brier"])
             finally:
                 if conn is not None:
                     conn.close()

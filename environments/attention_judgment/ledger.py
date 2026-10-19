@@ -29,7 +29,7 @@ def timestamp(value):
 
 class Ledger:
     def __init__(self, path):
-        path = Path(path)
+        self.path = path = Path(path).resolve()
         path.parent.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(path, timeout=30)
         self.db.row_factory = sqlite3.Row

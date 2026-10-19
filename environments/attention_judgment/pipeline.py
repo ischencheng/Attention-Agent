@@ -7,6 +7,8 @@ the same verifier as the API. It keeps its own append-only production ledger,
 separate from the earlier direct-RSS experiment. Database insertion time is
 recorded, but evaluation begins only after this observer freezes a version:
 ordinary non-evidence decision fields can be edited in the application DB.
+Strong agent_state is archived separately as unscored application research;
+its contents are not independently verified evidence or published predictions.
 
 From the repository root (DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASSWORD apply):
   .venv/bin/python environments/attention_judgment/pipeline.py sync
@@ -23,6 +25,7 @@ from __future__ import annotations
 import argparse
 import copy
 from datetime import datetime, timezone
+import fcntl
 import json
 import math
 import os
@@ -41,6 +44,7 @@ from market import (evaluate_horizon, fetch_prices, horizon_complete,
 
 DECISION_KIND = "production_decision"
 SETTLEMENT_KIND = "production_settlement"
+RESEARCH_KIND = "production_research_state"
 SYMBOL = re.compile(r"[A-Z][A-Z0-9.\-^]{0,14}\Z")
 
 
@@ -207,14 +211,93 @@ def freeze_packet(conn, ledger, row, *, source_id="attention-agent"):
             "forecasts": len(forecasts), "forecast_errors": forecast_errors}
 
 
+def strong_state_ids():
+    """Read only the known Strong keys and the explicitly configured alias."""
+    keys = {"claude-strong", "codex-strong"}
+    configured = os.environ.get("STRONG_AGENT_ID", "").strip()
+    if configured:
+        keys.add(configured)
+    return sorted(keys)
+
+
+def research_summary(frozen):
+    """Counts and lineage only; report output never includes the archived state."""
+    state = frozen["state"]
+    def count(name):
+        value = state.get(name)
+        return len(value) if isinstance(value, (dict, list)) else 0
+    return {"stable_id": frozen["stable_id"], "agent_id": frozen["agent_id"],
+            "version": frozen["version"], "updated_at": frozen["updated_at"],
+            "frozen_at": frozen["frozen_at"], "state_sha256": frozen["state_sha256"],
+            "thesis_count": count("theses"), "pending_theme_count": count("pending_themes"),
+            "evaluation_status": "unscored_application_research"}
+
+
+def freeze_research_state(ledger, row, *, source_id="attention-agent"):
+    """Archive actual Strong working memory without turning it into a decision.
+
+    Whole state is retained in the local ledger for later comparison. Symbols,
+    forecasts, market dates and outcomes are deliberately not derived from it.
+    A later write of identical content does not create another research version.
+    """
+    agent_id = row["agent_id"]
+    if agent_id not in strong_state_ids():
+        raise ValueError("only configured Strong agent state can be archived as research")
+    if not isinstance(source_id, str) or not source_id.strip():
+        raise ValueError("source_id identifies a stable pipeline deployment")
+    state = row["state"]
+    if not isinstance(state, dict):
+        raise ValueError("Strong research state must be a JSON object")
+    state_hash = digest(state)
+    updated_at = _iso(row["updated_at"])
+    stable_id = f"{source_id}:agent_state:{agent_id}"
+    with ledger.transaction():
+        frozen_at = utcnow()
+        if timestamp(updated_at) > timestamp(frozen_at):
+            raise ValueError("Strong state update is after observer freeze time")
+        prior = next((entry for entry in reversed(ledger.entries(RESEARCH_KIND))
+                      if entry["payload"]["stable_id"] == stable_id), None)
+        if prior and timestamp(updated_at) < timestamp(prior["payload"]["updated_at"]):
+            raise ValueError("Strong snapshot is older than the latest archived state")
+        if prior and prior["payload"]["state_sha256"] == state_hash:
+            return {"status": "unchanged", "key": prior["key"], "hash": prior["hash"],
+                    **research_summary(prior["payload"])}
+        version = prior["payload"]["version"] + 1 if prior else 1
+        frozen = {"mode": "unscored_application_research", "stable_id": stable_id,
+                  "source_id": source_id, "table": "agent_state", "agent_id": agent_id,
+                  "version": version, "previous_version_hash": prior["hash"] if prior else None,
+                  "updated_at": updated_at, "frozen_at": frozen_at,
+                  "state": copy.deepcopy(state), "state_sha256": state_hash,
+                  "evidence_status": "application_state_not_independently_verified",
+                  "evaluation_status": "unscored_application_research"}
+        key = f"{stable_id}:v{version}"
+        value = ledger.append(RESEARCH_KIND, key, frozen)
+    return {"status": "frozen", "key": key, "hash": value, **research_summary(frozen)}
+
+
 def sync(conn, ledger, *, source_id="attention-agent"):
     """Observe all rows, including edits to older IDs, within one MVCC snapshot.
 
     The caller owns connection lifetime. No DB writes or Kafka publishing occur.
     A failed evidence graph is reported separately and never enters evaluation.
+    Serialize observers before PostgreSQL takes a snapshot, including unchanged
+    content observations. Per-record append locks alone allow an older snapshot
+    to finish after a newer one and make stale content look like a reversion.
+    Like the local supervisor, this observer runs on POSIX (macOS/Linux).
     """
+    lock_path = ledger.path.with_name(ledger.path.name + ".sync.lock")
+    with lock_path.open("a") as stream:
+        fcntl.flock(stream, fcntl.LOCK_EX)
+        try:
+            return _sync_locked(conn, ledger, source_id=source_id)
+        finally:
+            fcntl.flock(stream, fcntl.LOCK_UN)
+
+
+def _sync_locked(conn, ledger, *, source_id):
     conn.set_session(isolation_level="REPEATABLE READ", readonly=True)
     results, rejected = [], []
+    research_results, research_rejected = [], []
     with conn:
         with conn.cursor() as cur:
             cur.execute("SELECT id, payload, kafka_topic, kafka_partition, kafka_offset, created_at "
@@ -229,9 +312,22 @@ def sync(conn, ledger, *, source_id="attention-agent"):
                         results.append(freeze_packet(conn, ledger, row, source_id=source_id))
                     except (ValueError, TypeError, KeyError) as exc:
                         rejected.append({"decision_id": row["id"], "error": str(exc)})
+        with conn.cursor() as cur:
+            cur.execute("SELECT agent_id, state, updated_at FROM agent_state "
+                        "WHERE agent_id = ANY(%s) ORDER BY agent_id", (strong_state_ids(),))
+            for agent_id, state, updated_at in cur.fetchall():
+                try:
+                    research_results.append(freeze_research_state(ledger, {
+                        "agent_id": agent_id, "state": state, "updated_at": updated_at,
+                    }, source_id=source_id))
+                except (ValueError, TypeError, KeyError) as exc:
+                    research_rejected.append({"agent_id": agent_id, "error": str(exc)})
     result = {"source_id": source_id, "checked_at": utcnow(),
               "frozen": [r for r in results if r["status"] == "frozen"],
-              "unchanged": sum(r["status"] == "unchanged" for r in results), "rejected": rejected}
+              "unchanged": sum(r["status"] == "unchanged" for r in results), "rejected": rejected,
+              "research_frozen": [r for r in research_results if r["status"] == "frozen"],
+              "research_unchanged": sum(r["status"] == "unchanged" for r in research_results),
+              "research_rejected": research_rejected}
     ledger.append("production_sync", result["checked_at"], result)
     return result
 
@@ -296,12 +392,18 @@ def settle(ledger, *, as_of=None):
 def report(ledger):
     decisions = ledger.entries(DECISION_KIND)
     settlements = ledger.entries(SETTLEMENT_KIND)
+    research = ledger.entries(RESEARCH_KIND)
+    latest_research = {entry["payload"]["stable_id"]: entry for entry in research}
     scores = [e["payload"]["forecast_score"] for e in settlements
               if e["payload"].get("forecast_score") is not None]
     return {
         "mode": "production_forward", "ledger_hash": ledger.verify(),
         "decision_packets": len({e["payload"]["stable_id"] for e in decisions}),
         "frozen_versions": len(decisions),
+        "research_state_agents": len(latest_research), "research_state_versions": len(research),
+        "latest_research_states": [{"key": entry["key"], "hash": entry["hash"],
+                                    **research_summary(entry["payload"])}
+                                   for entry in latest_research.values()],
         "resolved_price_observations": len(settlements),
         "resolved_predeclared_forecasts": len(scores),
         "mean_brier": sum(s["brier"] for s in scores) / len(scores) if scores else None,
@@ -315,6 +417,7 @@ def report(ledger):
                        "forecast_errors": e["payload"]["forecast_errors"]} for e in decisions],
         "fundamental_thesis_correctness": "not automatically graded; compare independent later evidence with the frozen thesis",
         "limitations": ["observer of pipeline publications; does not generate decisions",
+                        "Strong working memory is archived as unscored research, not independently verified decisions",
                         "application thesis IDs are recorded only when explicitly supplied",
                         "no inferred probability from confidence, actions or prose",
                         "price observations are not trades, portfolio returns or proof of business-thesis correctness",
@@ -355,7 +458,7 @@ def main():
         else:
             result = report(ledger)
         print(json.dumps(result, ensure_ascii=False, indent=2))
-        if args.command == "sync" and result["rejected"]:
+        if args.command == "sync" and (result["rejected"] or result["research_rejected"]):
             raise SystemExit(1)
     finally:
         ledger.close()
