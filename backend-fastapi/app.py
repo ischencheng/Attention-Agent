@@ -132,6 +132,29 @@ def query_overview() -> dict[str, Any]:
                 """)
                 sources = {r["source"]: int(r["cnt"]) for r in cur.fetchall()}
                 row["sources"] = sources
+                # Summarize persistent working memory in the database. Do not
+                # expose full agent state, source documents or thesis snapshots.
+                cur.execute("""
+                    SELECT agent_id, updated_at,
+                        CASE jsonb_typeof(state->'pending_themes')
+                            WHEN 'array' THEN jsonb_array_length(state->'pending_themes')
+                            WHEN 'object' THEN (SELECT COUNT(*) FROM jsonb_object_keys(state->'pending_themes'))
+                            ELSE 0
+                        END AS pending_theme_count,
+                        CASE jsonb_typeof(state->'theses')
+                            WHEN 'array' THEN jsonb_array_length(state->'theses')
+                            WHEN 'object' THEN (SELECT COUNT(*) FROM jsonb_object_keys(state->'theses'))
+                            ELSE 0
+                        END AS thesis_count
+                    FROM agent_state ORDER BY updated_at DESC, agent_id
+                """)
+                agents = normalize_rows(cur.fetchall())
+                mid_ids = {"claude-mid", "codex-mid", os.getenv("MID_AGENT_ID", "claude-mid")}
+                strong_ids = {"claude-strong", "codex-strong", os.getenv("STRONG_AGENT_ID", "claude-strong")}
+                for agent in agents:
+                    agent["role"] = ("mid" if agent["agent_id"] in mid_ids else
+                                     "strong" if agent["agent_id"] in strong_ids else None)
+                row["agents"] = agents
                 return normalize_value(row)
 
 
