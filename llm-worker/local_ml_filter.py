@@ -22,7 +22,7 @@ FILTER_LATENCY = Histogram("local_ml_filter_latency_seconds", "Local ML filter l
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Local relevance filter before Fast Agent.")
+    parser = argparse.ArgumentParser(description="Relay source observations to Fast; optional legacy relevance filters.")
     parser.add_argument("--bootstrap", default="kafka1:19092,kafka2:19092,kafka3:19092")
     parser.add_argument("--input-topic", default="source_clean")
     parser.add_argument("--output-topic", default="fastagent_input")
@@ -31,7 +31,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--threshold", type=float, default=0.55)
     parser.add_argument("--metrics-port", type=int, default=8031)
     parser.add_argument("--poll-timeout-seconds", type=float, default=1.0)
-    parser.add_argument("--llm-provider", choices=("gemini", "local", "codex"), default="gemini")
+    parser.add_argument("--llm-provider", choices=("relay", "gemini", "local", "codex"), default="relay",
+                        help="relay forwards unchanged records without a model; other providers select the legacy filter")
     parser.add_argument("--llm-model", default=os.getenv("LOCAL_FILTER_MODEL", "gemini-2.5-flash-lite"))
     parser.add_argument("--llm-api-key", default=os.getenv("GEMINI_API_KEY", ""))
     parser.add_argument("--llm-timeout-seconds", type=float, default=float(os.getenv("LLM_TIMEOUT_SECONDS", "180")))
@@ -166,6 +167,20 @@ def process_record(msg: Any, payload: dict[str, Any], args: argparse.Namespace,
                    producer: Producer, consumer: Consumer) -> None:
     with FILTER_LATENCY.time():
         started_at = utcnow()
+        if args.llm_provider == "relay":
+            classifier = {"provider": "routing-policy", "model": None, "classified_by_model": False,
+                          "classification_mode": "relay", "usage": None,
+                          "reason": "Forwarded unchanged to Fast, the single model relevance gate.",
+                          "reason_status": "recorded"}
+            output_ack = produce_confirmed(producer, topic=args.output_topic,
+                                           key=msg.key(), value=msg.value(), headers=msg.headers())
+            event = routing_event(msg, payload, stage="relay", verdict=True, classifier=classifier,
+                                  started_at=started_at, completed_at=utcnow(),
+                                  output_topic=args.output_topic, output=output_ack)
+            publish_routing_event(producer, event, args.routing_topic)
+            consumer.commit(message=msg, asynchronous=False)
+            FILTERED_TOTAL.labels("forwarded").inc()
+            return
         model_used = "local_heuristic"
         classification_metadata = {"classified_by_model": False, "classification_mode": "local_threshold",
                                    "score": get_relevance_score(payload), "threshold": args.threshold,
@@ -241,7 +256,8 @@ def main() -> None:
             if payload is None:
                 # Invalid inputs are explicit drops; a commit failure is still retried in order.
                 LOGGER.warning("invalid JSON payload at %s/%s/%s", msg.topic(), msg.partition(), msg.offset())
-                operation = lambda: reject_invalid_record(msg, producer, consumer, stage="filter", topic=args.routing_topic)
+                stage = "relay" if args.llm_provider == "relay" else "filter"
+                operation = lambda: reject_invalid_record(msg, producer, consumer, stage=stage, topic=args.routing_topic)
             else:
                 operation = lambda: process_record(msg, payload, args, producer, consumer)
             if not retry_record(operation, lambda: running):

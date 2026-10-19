@@ -142,6 +142,7 @@ class RoutingSinkPostgresTests(unittest.TestCase):
         with self.conn.cursor() as cursor:
             cursor.execute((ROOT / "postgres/init/003_routing_events.sql").read_text())
             cursor.execute("TRUNCATE routing_events")
+            cursor.execute((ROOT / "postgres/init/004_relay_routing_stage.sql").read_text())
         self.conn.commit()
         self.input = message(42)
         self.input.topic.return_value = "fastagent_input"
@@ -182,6 +183,46 @@ class RoutingSinkPostgresTests(unittest.TestCase):
         self.assertEqual(rows[0][:6], (self.payload["event_id"], self.payload["reason"], "rss", "original-1",
                                       self.payload["raw_sha256"], 100))
         self.assertEqual(rows[0][6], self.payload)
+
+    def test_relay_migration_preserves_legacy_audit_and_accepts_distinct_stage(self):
+        # Simulate an existing database before applying the additive migration.
+        with self.conn.cursor() as cursor:
+            cursor.execute("ALTER TABLE routing_events DROP CONSTRAINT routing_events_stage_check")
+            cursor.execute("ALTER TABLE routing_events ADD CONSTRAINT routing_events_stage_check "
+                           "CHECK (stage IN ('filter', 'fast'))")
+        self.conn.commit()
+        original = {"source": "rss", "source_id": "original-1", "raw": {"text": "Original evidence"}}
+        old_filter = routing_event(self.input, original, stage="filter", verdict=False,
+                                   classifier={"provider": "codex", "model": "old-model", "classified_by_model": True,
+                                               "reason": "Prior filter verdict"},
+                                   started_at="2026-10-19T05:00:00Z", completed_at="2026-10-19T05:00:01Z")
+        self.insert(old_filter)
+        with self.conn.cursor() as cursor:
+            migration = (ROOT / "postgres/init/004_relay_routing_stage.sql").read_text()
+            cursor.execute(migration)
+            cursor.execute(migration)
+        self.conn.commit()
+        relay = routing_event(self.input, original, stage="relay", verdict=True,
+                              classifier={"provider": "routing-policy", "model": None, "classified_by_model": False,
+                                          "classification_mode": "relay", "usage": None,
+                                          "reason": "Forwarded unchanged to Fast"},
+                              started_at="2026-10-19T05:01:00Z", completed_at="2026-10-19T05:01:01Z",
+                              output_topic="fastagent_input", output={"topic": "fastagent_input", "partition": 1, "offset": 51})
+        self.audit_message.offset.return_value = 101
+        self.insert(relay)
+        self.audit_message.offset.return_value = 102
+        self.insert(self.payload)
+        self.audit_message.offset.return_value = 103
+        self.insert(relay)
+        with self.conn.cursor() as cursor:
+            cursor.execute("SELECT stage, payload FROM routing_events ORDER BY id")
+            self.assertEqual(cursor.fetchall(), [("filter", old_filter), ("relay", relay), ("fast", self.payload)])
+        changed = copy.deepcopy(relay)
+        changed["classifier"]["reason"] = "Conflicting relay policy"
+        changed["reason"] = "Conflicting relay policy"
+        with self.assertRaisesRegex(ValueError, "Conflicting routing audit"):
+            self.insert(changed)
+        self.conn.rollback()
 
     def test_conflicting_verdict_or_original_hash_cannot_replace_first_event(self):
         self.insert(self.payload)

@@ -61,6 +61,68 @@ class ReliabilityTests(unittest.TestCase):
                                        attention_threshold=0.5, threshold=0.5, output_topic="output", routing_topic="routing_events",
                                        embedding_provider="http", embedding_dim=768, embedding_timeout_seconds=180)
 
+    def test_relay_is_default_and_legacy_filters_require_explicit_selection(self):
+        with patch.object(sys, "argv", ["local_ml_filter.py"]):
+            args = filter_worker.parse_args()
+        self.assertEqual(args.llm_provider, "relay")
+        self.assertEqual((args.input_topic, args.output_topic, args.group_id),
+                         ("source_clean", "fastagent_input", "local-ml-filter-v1"))
+        for provider in ("codex", "gemini", "local"):
+            with patch.object(sys, "argv", ["local_ml_filter.py", "--llm-provider", provider]):
+                self.assertEqual(filter_worker.parse_args().llm_provider, provider)
+
+    def test_relay_preserves_input_bytes_key_headers_without_model_calls(self):
+        self.args.llm_provider = "relay"
+        # Noncanonical whitespace and a binary key must survive the relay too.
+        value = json.dumps(self.payload, ensure_ascii=False, indent=2).encode() + b"\n"
+        self.msg.value.return_value = value
+        headers = [("custom", b"\xff"), ("optional", None),
+                   ("traceparent", b"00-0123456789abcdef0123456789abcdef-0123456789abcdef-01")]
+        self.msg.headers.return_value = headers
+        for key in (b"\xff-key", None):
+            with self.subTest(key=key), patch.object(runtime.requests, "post") as post, \
+                    patch.object(filter_worker, "classify_with_codex") as codex, \
+                    patch.object(filter_worker, "get_gemini_yes_no") as gemini:
+                self.msg.key.return_value = key
+                events = []
+                producer = Producer(events)
+                filter_worker.process_record(self.msg, self.payload, self.args, producer, Consumer(events))
+                output, audit = producer.records
+                self.assertEqual((output["value"], output["key"], output["headers"]), (value, key, headers))
+                self.assertNotIn("local_ml_filter", json.loads(output["value"]))
+                event = json.loads(audit["value"])
+                self.assertEqual(event["stage"], "relay")
+                self.assertEqual(event["outcome"], "pass")
+                self.assertEqual(event["raw_sha256"], runtime.digest_json(self.payload["raw"]))
+                self.assertEqual(event["output"], {"topic": "output", "partition": 2, "offset": 99})
+                self.assertEqual(event["classifier"], {
+                    "provider": "routing-policy", "model": None, "classified_by_model": False,
+                    "classification_mode": "relay", "usage": None,
+                    "reason": "Forwarded unchanged to Fast, the single model relevance gate.",
+                    "reason_status": "recorded"})
+                self.assertEqual(event["trace"]["traceparent"], headers[-1][1].decode())
+                self.assertEqual(events, ["produce", "ack", "produce", "ack", "commit"])
+                post.assert_not_called()
+                codex.assert_not_called()
+                gemini.assert_not_called()
+
+    def test_relay_output_or_audit_failure_keeps_input_uncommitted(self):
+        self.args.llm_provider = "relay"
+        self.msg.value.return_value = json.dumps(self.payload).encode()
+        for fail_topic in ("output", "routing_events"):
+            with self.subTest(fail_topic=fail_topic):
+                events = []
+                producer = Producer(events, error="delivery failed", fail_topic=fail_topic)
+                with self.assertRaisesRegex(RuntimeError, "delivery failed"):
+                    filter_worker.process_record(self.msg, self.payload, self.args, producer, Consumer(events))
+                self.assertNotIn("commit", events)
+                self.assertEqual(producer.record["topic"], fail_topic)
+        events = []
+        with self.assertRaises(TimeoutError):
+            filter_worker.process_record(self.msg, self.payload, self.args,
+                                         Producer(events, callback=False, remaining=1), Consumer(events))
+        self.assertNotIn("commit", events)
+
     def test_oversize_routes_for_full_review_without_claiming_a_model_verdict(self):
         self.payload["data"]["text"] = "x" * 128001
         for module in (filter_worker, fast_worker):
@@ -195,14 +257,40 @@ class ReliabilityTests(unittest.TestCase):
 
     def test_invalid_json_rejection_is_audited_before_commit(self):
         self.msg.value.return_value = b"not-json"
-        events = []
-        producer = Producer(events)
-        runtime.reject_invalid_record(self.msg, producer, Consumer(events), stage="fast", topic="routing_events")
-        event = json.loads(producer.record["value"])
-        self.assertEqual(event["classifier"]["classification_mode"], "invalid_json")
-        self.assertEqual(event["original_hash_status"], "not_recorded")
-        self.assertIsNone(event["raw_sha256"])
-        self.assertEqual(events, ["produce", "ack", "commit"])
+        for stage in ("relay", "filter", "fast"):
+            with self.subTest(stage=stage):
+                events = []
+                producer = Producer(events)
+                runtime.reject_invalid_record(self.msg, producer, Consumer(events), stage=stage, topic="routing_events")
+                event = json.loads(producer.record["value"])
+                self.assertEqual(event["stage"], stage)
+                self.assertEqual(event["classifier"]["classification_mode"], "invalid_json")
+                self.assertEqual(event["original_hash_status"], "not_recorded")
+                self.assertIsNone(event["raw_sha256"])
+                self.assertIsNone(event["classifier"].get("usage"))
+                if stage != "relay":
+                    self.assertNotIn("usage", event["classifier"])
+                self.assertEqual(events, ["produce", "ack", "commit"])
+
+    def test_relay_main_audits_malformed_input_under_relay_stage(self):
+        self.args.llm_provider = "relay"
+        args = argparse.Namespace(**vars(self.args), bootstrap="kafka", group_id="test", log_level="INFO",
+                                  metrics_port=9999, input_topic="input", poll_timeout_seconds=1)
+        consumer, producer = Mock(), Mock()
+        self.msg.error.return_value = None
+        self.msg.value.return_value = b"not-json"
+        consumer.poll.return_value = self.msg
+        handlers = []
+        with patch.object(filter_worker, "parse_args", return_value=args), \
+                patch.object(filter_worker, "Consumer", return_value=consumer), \
+                patch.object(filter_worker, "Producer", return_value=producer), \
+                patch.object(filter_worker, "ensure_routing_topic"), \
+                patch.object(filter_worker, "start_http_server"), \
+                patch.object(filter_worker.signal, "signal", side_effect=lambda _, fn: handlers.append(fn)), \
+                patch.object(filter_worker, "reject_invalid_record", side_effect=lambda *a, **kw: handlers[0]()) as reject:
+            filter_worker.main()
+        self.assertEqual(consumer.poll.call_count, 1)
+        reject.assert_called_once_with(self.msg, producer, consumer, stage="relay", topic="routing_events")
 
     def test_only_valid_actual_traceparent_is_retained(self):
         header = "00-0123456789abcdef0123456789abcdef-0123456789abcdef-01"
