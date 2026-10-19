@@ -17,7 +17,10 @@ def gateway_headers() -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"} if token else {}
 
 
-def classify_with_codex(payload: dict[str, Any], role: str, text: str, timeout: float) -> tuple[bool, str]:
+def classify_with_codex(payload: dict[str, Any], role: str, text: str, timeout: float) -> tuple[bool, str, dict[str, Any]]:
+    if len(text) > 128000:
+        return True, "routing-policy", {"classified_by_model": False, "full_review_required": True,
+                                       "classification_mode": "oversize_full_review"}
     endpoint = os.getenv("CODEX_GATEWAY_URL", "http://host.docker.internal:8765/classify")
     response = requests.post(
         endpoint,
@@ -33,7 +36,15 @@ def classify_with_codex(payload: dict[str, Any], role: str, text: str, timeout: 
     model = result.get("model")
     if not isinstance(model, str) or not model.strip():
         raise ValueError("Codex gateway must identify its model")
-    return result["verdict"], model
+    metadata = {"classified_by_model": result.get("classified_by_model", True),
+                "full_review_required": result.get("full_review_required", False),
+                "classification_mode": result.get("classification_mode", "model")}
+    if type(metadata["classified_by_model"]) is not bool or type(metadata["full_review_required"]) is not bool:
+        raise ValueError("Invalid classification coverage metadata")
+    for key in ("evaluated_chunks", "total_chunks"):
+        if key in result:
+            metadata[key] = result[key]
+    return result["verdict"], model, metadata
 
 
 def validate_embedding(values: Any, dimensions: int) -> list[float]:

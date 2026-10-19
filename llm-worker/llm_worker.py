@@ -135,8 +135,9 @@ def process_record(msg: Any, payload: dict[str, Any], args: argparse.Namespace,
         consumer.commit(message=msg, asynchronous=False)
         return
     model_used = "local_heuristic"
+    classification_metadata = {}
     if args.llm_provider == "codex":
-        is_yes, model_used = classify_with_codex(payload, "fast", build_message_text(payload), args.llm_timeout_seconds)
+        is_yes, model_used, classification_metadata = classify_with_codex(payload, "fast", build_message_text(payload), args.llm_timeout_seconds)
     elif args.llm_provider == "gemini":
         is_yes = get_gemini_yes_no(payload, args.llm_model, args.llm_api_key, args.llm_timeout_seconds)
         model_used = args.llm_model
@@ -147,7 +148,7 @@ def process_record(msg: Any, payload: dict[str, Any], args: argparse.Namespace,
     if is_yes:
         output = dict(payload)
         output["verdict"] = "yes"
-        output["fast_agent"] = {"provider": args.llm_provider, "model": model_used}
+        output["fast_agent"] = {"provider": args.llm_provider, "model": model_used, **classification_metadata}
         produce_confirmed(producer, topic=args.output_topic, key=source_id.encode("utf-8"),
                           value=json.dumps(output, ensure_ascii=False).encode("utf-8"), headers=msg.headers())
     consumer.commit(message=msg, asynchronous=False)

@@ -164,10 +164,11 @@ def process_record(msg: Any, payload: dict[str, Any], args: argparse.Namespace,
                    producer: Producer, consumer: Consumer) -> None:
     with FILTER_LATENCY.time():
         model_used = "local_heuristic"
+        classification_metadata = {}
         if payload.get("content_type") == "price_tick":
             is_yes, model_used = True, "price_tick_passthrough"
         elif args.llm_provider == "codex":
-            is_yes, model_used = classify_with_codex(payload, "filter", build_message_text(payload), args.llm_timeout_seconds)
+            is_yes, model_used, classification_metadata = classify_with_codex(payload, "filter", build_message_text(payload), args.llm_timeout_seconds)
         elif args.llm_provider == "gemini":
             is_yes = get_gemini_yes_no(payload, args.llm_model, args.llm_api_key, args.llm_timeout_seconds)
             model_used = args.llm_model
@@ -177,7 +178,7 @@ def process_record(msg: Any, payload: dict[str, Any], args: argparse.Namespace,
             is_yes = get_relevance_score(payload) >= args.threshold
         if is_yes:
             output = dict(payload)
-            output["local_ml_filter"] = {"verdict": True, "score": 1.0, "provider": args.llm_provider, "model": model_used}
+            output["local_ml_filter"] = {"verdict": True, "score": 1.0, "provider": args.llm_provider, "model": model_used, **classification_metadata}
             produce_confirmed(producer, topic=args.output_topic,
                               key=derive_message_key(payload, msg.key()).encode("utf-8"),
                               value=json.dumps(output, ensure_ascii=False).encode("utf-8"), headers=msg.headers())

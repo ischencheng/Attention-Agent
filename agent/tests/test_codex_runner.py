@@ -3,6 +3,10 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
+import signal
+import subprocess
+import time
 from pathlib import Path
 import sys
 import tempfile
@@ -39,6 +43,10 @@ prompt = sys.stdin.read()
 final = Path(args[args.index("--output-last-message") + 1])
 (final.parent / "observed.json").write_text(json.dumps({"args": args, "prompt": prompt}))
 print(json.dumps({"type": "thread.started", "thread_id": "offline-fake"}), flush=True)
+if prompt == "signal":
+    import os
+    (final.parent / "child.pid").write_text(str(os.getpid()))
+    time.sleep(30)
 if prompt == "timeout":
     subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
     time.sleep(30)
@@ -89,6 +97,28 @@ class RunnerTests(unittest.TestCase):
         self.assertIn("sandbox_workspace_write.network_access=true", observed["args"])
         self.assertIn("workspace-write", observed["args"])
 
+    def test_classification_disables_tools_and_project_instructions(self):
+        self.invoke(disable_tools=True, sandbox="read-only")
+        observed = json.loads((self.root / "run/observed.json").read_text())
+        for flag in ("features.shell_tool=false", "features.apps=false", "features.plugins=false",
+                     'web_search="disabled"', "project_doc_max_bytes=0", "agents.enabled=false", "skills.include_instructions=false"):
+            self.assertIn(flag, observed["args"])
+        self.assertTrue(json.loads((self.root / "run/run.json").read_text())["disable_tools"])
+
+    def test_classification_custom_instructions_are_saved_and_scoped(self):
+        self.invoke(disable_tools=True, sandbox="read-only", model_instructions="Only classify the observation.")
+        self.assertEqual((self.root / "run/model-instructions.txt").read_text(), "Only classify the observation.")
+        observed = json.loads((self.root / "run/observed.json").read_text())
+        self.assertTrue(any(argument.startswith("model_instructions_file=") for argument in observed["args"]))
+
+    def test_custom_instructions_cannot_override_agent_cycles(self):
+        with self.assertRaisesRegex(ValueError, "classification"):
+            self.invoke(model_instructions="Only classify.")
+
+    def test_disabled_tools_cannot_enable_network_or_writes(self):
+        with self.assertRaisesRegex(ValueError, "disable_tools"):
+            self.invoke(disable_tools=True)
+
     def test_nonzero_exit_cannot_be_saved_as_success(self):
         with self.assertRaises(runner.CodexRunError) as caught:
             self.invoke("nonzero")
@@ -124,6 +154,30 @@ class RunnerTests(unittest.TestCase):
         report = json.loads((self.root / "run/run.json").read_text())
         self.assertFalse(report["success"])
         self.assertLess(report["wall_seconds"], 4)
+
+    @unittest.skipUnless(os.name == "posix", "SIGTERM cleanup uses POSIX process groups")
+    def test_sigterm_terminates_codex_child_and_records_failure(self):
+        output = self.root / "signal-run"
+        driver = (
+            "import sys; from pathlib import Path; "
+            f"sys.path.insert(0, {str(ROOT)!r}); import codex_runner; "
+            f"codex_runner.run('signal', {SCHEMA!r}, {str(self.root)!r}, {str(output)!r}, 30, codex_bin={str(self.cli)!r})"
+        )
+        process = subprocess.Popen([sys.executable, "-c", driver], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.addCleanup(lambda: process.kill() if process.poll() is None else None)
+        deadline = time.monotonic() + 5
+        while not (output / "child.pid").exists() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        self.assertTrue((output / "child.pid").exists())
+        child_pid = int((output / "child.pid").read_text())
+        process.terminate()
+        process.communicate(timeout=5)
+        self.assertNotEqual(process.returncode, 0)
+        with self.assertRaises(ProcessLookupError):
+            os.kill(child_pid, 0)
+        metadata = json.loads((output / "run.json").read_text())
+        self.assertFalse(metadata["success"])
+        self.assertLess(metadata["wall_seconds"], 5)
 
     def test_stale_final_cannot_be_reused(self):
         self.invoke()

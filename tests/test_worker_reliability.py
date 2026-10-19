@@ -49,14 +49,29 @@ class ReliabilityTests(unittest.TestCase):
                                        attention_threshold=0.5, threshold=0.5, output_topic="output",
                                        embedding_provider="http", embedding_dim=768, embedding_timeout_seconds=180)
 
+    def test_oversize_routes_for_full_review_without_claiming_a_model_verdict(self):
+        self.payload["data"]["text"] = "x" * 128001
+        for module in (filter_worker, fast_worker):
+            with patch.object(runtime.requests, "post") as post:
+                events = []
+                producer = Producer(events)
+                module.process_record(self.msg, self.payload, self.args, producer, Consumer(events))
+                output = json.loads(producer.record["value"])
+                metadata = output["local_ml_filter" if module is filter_worker else "fast_agent"]
+                self.assertFalse(metadata["classified_by_model"])
+                self.assertTrue(metadata["full_review_required"])
+                self.assertEqual(metadata["model"], "routing-policy")
+                self.assertEqual(output["data"], self.payload["data"])
+                post.assert_not_called()
+
     def test_rss_body_is_preserved_in_all_model_inputs(self):
         payload = {"content_type": "news_article", "data": {"title": "Headline", "text": "Full RSS excerpt", "snippet": "Short preview"}}
         for build in (filter_worker.build_message_text, fast_worker.build_message_text, embed_worker.extract_text):
             self.assertEqual(build(payload), "Headline Full RSS excerpt")
 
     def test_all_workers_ack_before_input_commit(self):
-        for module, provider, result in ((filter_worker, "classify_with_codex", (True, "codex-test")),
-                                         (fast_worker, "classify_with_codex", (True, "codex-test")),
+        for module, provider, result in ((filter_worker, "classify_with_codex", (True, "codex-test", {"classified_by_model": True})),
+                                         (fast_worker, "classify_with_codex", (True, "codex-test", {"classified_by_model": True})),
                                          (embed_worker, "get_http_embedding", ([0.1] * 768, "semantic-test"))):
             with self.subTest(worker=module.__name__), patch.object(module, provider, return_value=result):
                 events = []
@@ -67,8 +82,8 @@ class ReliabilityTests(unittest.TestCase):
                 self.assertEqual(output["data"], self.payload["data"])
 
     def test_delivery_errors_never_commit(self):
-        for module, provider, result in ((filter_worker, "classify_with_codex", (True, "codex-test")),
-                                         (fast_worker, "classify_with_codex", (True, "codex-test")),
+        for module, provider, result in ((filter_worker, "classify_with_codex", (True, "codex-test", {"classified_by_model": True})),
+                                         (fast_worker, "classify_with_codex", (True, "codex-test", {"classified_by_model": True})),
                                          (embed_worker, "get_http_embedding", ([0.1] * 768, "semantic-test"))):
             for kwargs in ({"error": "broker rejected"}, {"remaining": 1, "callback": False}):
                 with self.subTest(worker=module.__name__, failure=kwargs), patch.object(module, provider, return_value=result):
@@ -96,7 +111,7 @@ class ReliabilityTests(unittest.TestCase):
 
     def test_valid_negative_verdict_commits_without_publishing(self):
         for module in (filter_worker, fast_worker):
-            with patch.object(module, "classify_with_codex", return_value=(False, "test")):
+            with patch.object(module, "classify_with_codex", return_value=(False, "test", {"classified_by_model": True})):
                 events = []
                 module.process_record(self.msg, self.payload, self.args, Producer(events), Consumer(events))
                 self.assertEqual(events, ["commit"])

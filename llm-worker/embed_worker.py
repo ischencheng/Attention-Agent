@@ -131,7 +131,7 @@ def process_record(msg: Any, payload: dict[str, Any], args: argparse.Namespace,
             EMBED_TOTAL.labels("empty_text").inc()
             return
         if args.embedding_provider == "http":
-            embedding, model_used = get_http_embedding(text, args.embedding_dim, args.embedding_timeout_seconds)
+            embedding, model_used = get_http_embedding(text[:128000], args.embedding_dim, args.embedding_timeout_seconds)
         else:
             embedding = get_gemini_embedding(text, args.embedding_model, args.embedding_api_key,
                                               args.embedding_dim, args.embedding_timeout_seconds)
@@ -141,6 +141,7 @@ def process_record(msg: Any, payload: dict[str, Any], args: argparse.Namespace,
         output = dict(payload)
         output["embedding"] = embedding
         output["embedding_model"] = model_used
+        output["embedding_coverage"] = {"input_characters": len(text), "embedded_characters": min(len(text), 128000) if args.embedding_provider == "http" else min(len(text), 8000), "original_preserved": True}
         produce_confirmed(producer, topic=args.output_topic, key=source_id.encode("utf-8"),
                           value=json.dumps(output, ensure_ascii=False).encode("utf-8"), headers=msg.headers())
         consumer.commit(message=msg, asynchronous=False)
