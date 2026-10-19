@@ -586,6 +586,8 @@ services:
     build:
       context: ./agent
       dockerfile: Dockerfile
+      args:
+        CODEX_CLI_VERSION: "${CODEX_CLI_VERSION:-0.137.0}"
     container_name: mid-agent
     hostname: mid-agent
     networks: [backend]
@@ -598,10 +600,16 @@ services:
       DB_PASSWORD: bluesky
       KAFKA_BOOTSTRAP: "kafka1:19092,kafka2:19092,kafka3:19092"
       GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
+      CODEX_API_KEY: "${CODEX_API_KEY:-}"
+      CODEX_MODEL: "${MID_CODEX_MODEL:-${CODEX_MODEL:-}}"
+      CODEX_TIMEOUT_SECONDS: "${CODEX_TIMEOUT_SECONDS:-900}"
+      MID_AGENT_ID: "${MID_AGENT_ID:-claude-mid}"
     volumes:
-      - ${CLAUDE_AUTH_DIR}:/home/agent/.claude
+      - mid-codex-home:/home/agent/.codex
+      - mid-agent-runs:/app/runs
       - ./skills:/app/skills:ro
-      - ./agent/CLAUDE.md:/app/CLAUDE.md:ro
+      - ./agent/AGENTS.md:/app/AGENTS.md:ro
+      - ./agent/codex_runner.py:/app/codex_runner.py:ro
     restart: unless-stopped
     depends_on:
       kafka1:
@@ -613,6 +621,8 @@ services:
     build:
       context: ./agent
       dockerfile: Dockerfile
+      args:
+        CODEX_CLI_VERSION: "${CODEX_CLI_VERSION:-0.137.0}"
     container_name: strong-agent
     hostname: strong-agent
     networks: [backend]
@@ -625,11 +635,17 @@ services:
       DB_PASSWORD: bluesky
       KAFKA_BOOTSTRAP: "kafka1:19092,kafka2:19092,kafka3:19092"
       GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
-      WATCHLIST: "${WATCHLIST:-NVDA,SNDK,SPY,QQQ}"
+      CODEX_API_KEY: "${CODEX_API_KEY:-}"
+      CODEX_MODEL: "${STRONG_CODEX_MODEL:-${CODEX_MODEL:-}}"
+      CODEX_TIMEOUT_SECONDS: "${CODEX_TIMEOUT_SECONDS:-900}"
+      STRONG_AGENT_ID: "${STRONG_AGENT_ID:-claude-strong}"
+      RESEARCH_CONTEXT: "${RESEARCH_CONTEXT:-ai,earnings,guidance,capex,datacenter,storage,power,energy,nuclear,semiconductor,gpu,inference,llm,margin,valuation,cpi,fed,yield}"
     volumes:
-      - ${CLAUDE_AUTH_DIR}:/home/agent/.claude
+      - strong-codex-home:/home/agent/.codex
+      - strong-agent-runs:/app/runs
       - ./skills:/app/skills:ro
-      - ./agent/CLAUDE.md:/app/CLAUDE.md:ro
+      - ./agent/AGENTS.md:/app/AGENTS.md:ro
+      - ./agent/codex_runner.py:/app/codex_runner.py:ro
     restart: unless-stopped
     depends_on:
       kafka1:
@@ -748,3 +764,9 @@ services:
 
 networks:
   backend: {}
+
+volumes:
+  mid-codex-home:
+  strong-codex-home:
+  mid-agent-runs:
+  strong-agent-runs:

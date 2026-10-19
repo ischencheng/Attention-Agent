@@ -6,16 +6,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     && ln -sf /usr/bin/python3 /usr/bin/python
 
-# Install Claude Code CLI globally
-RUN npm install -g @anthropic-ai/claude-code
+# Open-source Codex CLI; the selected hosted model is a separate service.
+ARG CODEX_CLI_VERSION=0.137.0
+RUN npm install -g @openai/codex@${CODEX_CLI_VERSION}
 
 # Install Python dependencies for skills
 WORKDIR /app/skills
 COPY skills-requirements.txt /app/skills/requirements.txt
 RUN pip3 install --no-cache-dir --break-system-packages -r /app/skills/requirements.txt
 
-# Create non-root user (required for --dangerously-skip-permissions)
-RUN useradd -m -s /bin/bash agent
+# Independent writable work/auth/run directories, with no host credential mount.
+RUN useradd -m -s /bin/bash agent \
+    && mkdir -p /app/runs /home/agent/.codex \
+    && chown -R agent:agent /app /home/agent/.codex
+COPY AGENTS.md /app/AGENTS.md
+COPY codex_runner.py /app/codex_runner.py
+ENV CODEX_HOME=/home/agent/.codex
 USER agent
 WORKDIR /app
 
