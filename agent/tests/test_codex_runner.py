@@ -61,7 +61,10 @@ if prompt == "signal":
 if prompt == "timeout":
     subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
     time.sleep(30)
-if prompt == "bad-events":
+if prompt in {"unicode-events", "unicode-then-bad-events"}:
+    print(json.dumps({"type": "item.completed", "item": {"type": "command_execution",
+        "aggregated_output": "before\u2028middle\u2029next\u0085after"}}, ensure_ascii=False))
+if prompt in {"bad-events", "unicode-then-bad-events"}:
     print("not-json")
 if prompt != "missing-final":
     final.write_text(json.dumps({"value": "not-an-integer" if prompt == "bad-schema" else 7}))
@@ -242,6 +245,29 @@ class RunnerTests(unittest.TestCase):
     def test_malformed_events_rejected(self):
         with self.assertRaisesRegex(runner.CodexRunError, "Invalid JSONL"):
             self.invoke("bad-events")
+
+    def test_unicode_separators_roundtrip_inside_physical_jsonl_records(self):
+        result = self.invoke("unicode-events")
+        self.assertEqual([event["type"] for event in result["events"]],
+                         ["thread.started", "item.completed", "turn.completed"])
+        self.assertEqual(result["events"][1]["item"]["aggregated_output"],
+                         "before\u2028middle\u2029next\u0085after")
+        encoded = (self.root / "run/events.jsonl").read_bytes()
+        for separator in ("\u2028", "\u2029", "\u0085"):
+            self.assertIn(separator.encode("utf-8"), encoded)
+        self.assertEqual(encoded.count(b"\n"), 3)
+        self.assertEqual(result["usage"], {"input_tokens": 12, "cached_input_tokens": 3, "output_tokens": 4})
+        report = json.loads((self.root / "run/run.json").read_text())
+        self.assertTrue(report["success"])
+        self.assertEqual(report["event_count"], 3)
+
+    def test_malformed_record_after_unicode_reports_physical_line(self):
+        with self.assertRaisesRegex(runner.CodexRunError, "Invalid JSONL event at line 3:"):
+            self.invoke("unicode-then-bad-events")
+        report = json.loads((self.root / "run/run.json").read_text())
+        self.assertFalse(report["success"])
+        self.assertEqual(report["event_count"], 2)
+        self.assertEqual(report["returncode"], 0)
 
     def test_missing_final_rejected(self):
         with self.assertRaisesRegex(runner.CodexRunError, "no final"):
