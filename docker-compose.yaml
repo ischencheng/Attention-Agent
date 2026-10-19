@@ -325,7 +325,7 @@ services:
       - "--bootstrap"
       - "kafka1:19092,kafka2:19092,kafka3:19092"
       - "--topics"
-      - "source_raw,source_clean,vector_embedding,attention_ticket,annotations,decision_packet"
+      - "source_raw,source_clean,vector_embedding,attention_ticket,annotations,decision_packet,routing_events"
       - "--group-id"
       - "sink-postgres-v1"
       - "--db-host"

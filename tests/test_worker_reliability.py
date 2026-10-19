@@ -15,18 +15,26 @@ import embed_worker
 
 
 class Producer:
-    def __init__(self, events, error=None, remaining=0, callback=True):
+    def __init__(self, events, error=None, remaining=0, callback=True, fail_topic=None):
         self.events, self.error, self.remaining, self.callback = events, error, remaining, callback
         self.record = None
+        self.records = []
+        self.fail_topic = fail_topic
 
     def produce(self, **record):
         self.events.append("produce")
         self.record = record
+        self.records.append(record)
 
     def flush(self, timeout):
         self.events.append("ack")
         if self.callback:
-            self.record["on_delivery"](self.error, None)
+            ack = Mock()
+            ack.topic.return_value = self.record["topic"]
+            ack.partition.return_value = 2
+            ack.offset.return_value = 99
+            error = self.error if self.fail_topic is None or self.record["topic"] == self.fail_topic else None
+            self.record["on_delivery"](error, ack)
         return self.remaining
 
 
@@ -41,12 +49,16 @@ class Consumer:
 class ReliabilityTests(unittest.TestCase):
     def setUp(self):
         self.payload = {"source": "rss", "source_id": "item-1", "content_type": "news_article",
-                        "data": {"title": "A company raises its capital expenditure forecast", "snippet": "Evidence"}}
+                        "data": {"title": "A company raises its capital expenditure forecast", "snippet": "Evidence"},
+                        "raw": {"text": "Original publisher report"}}
         self.msg = Mock()
         self.msg.key.return_value = b"item-1"
         self.msg.headers.return_value = None
+        self.msg.topic.return_value = "input"
+        self.msg.partition.return_value = 1
+        self.msg.offset.return_value = 42
         self.args = argparse.Namespace(llm_provider="codex", llm_model="test-model", llm_api_key="", llm_timeout_seconds=180,
-                                       attention_threshold=0.5, threshold=0.5, output_topic="output",
+                                       attention_threshold=0.5, threshold=0.5, output_topic="output", routing_topic="routing_events",
                                        embedding_provider="http", embedding_dim=768, embedding_timeout_seconds=180)
 
     def test_oversize_routes_for_full_review_without_claiming_a_model_verdict(self):
@@ -56,7 +68,7 @@ class ReliabilityTests(unittest.TestCase):
                 events = []
                 producer = Producer(events)
                 module.process_record(self.msg, self.payload, self.args, producer, Consumer(events))
-                output = json.loads(producer.record["value"])
+                output = json.loads(producer.records[0]["value"])
                 metadata = output["local_ml_filter" if module is filter_worker else "fast_agent"]
                 self.assertFalse(metadata["classified_by_model"])
                 self.assertTrue(metadata["full_review_required"])
@@ -77,8 +89,8 @@ class ReliabilityTests(unittest.TestCase):
                 events = []
                 producer = Producer(events)
                 module.process_record(self.msg, self.payload, self.args, producer, Consumer(events))
-                self.assertEqual(events, ["produce", "ack", "commit"])
-                output = json.loads(producer.record["value"])
+                self.assertEqual(events, (["produce", "ack"] if module is embed_worker else ["produce", "ack"] * 2) + ["commit"])
+                output = json.loads(producer.records[0]["value"])
                 self.assertEqual(output["data"], self.payload["data"])
 
     def test_delivery_errors_never_commit(self):
@@ -109,12 +121,111 @@ class ReliabilityTests(unittest.TestCase):
                 module.process_record(self.msg, self.payload, self.args, Producer(events), Consumer(events))
             self.assertEqual(events, [])
 
-    def test_valid_negative_verdict_commits_without_publishing(self):
+    def test_valid_negative_verdict_publishes_audit_before_committing(self):
         for module in (filter_worker, fast_worker):
             with patch.object(module, "classify_with_codex", return_value=(False, "test", {"classified_by_model": True})):
                 events = []
-                module.process_record(self.msg, self.payload, self.args, Producer(events), Consumer(events))
-                self.assertEqual(events, ["commit"])
+                producer = Producer(events)
+                module.process_record(self.msg, self.payload, self.args, producer, Consumer(events))
+                self.assertEqual(events, ["produce", "ack", "commit"])
+                self.assertEqual(producer.record["topic"], "routing_events")
+                self.assertEqual(json.loads(producer.record["value"])["outcome"], "reject")
+
+    def test_gateway_preserves_reason_and_actual_classifier_metadata(self):
+        response = {"verdict": False, "model": "actual-model", "reason": "No new business or market evidence.",
+                    "cached": True, "cache_key": "key-1", "usage": {"input_tokens": 123},
+                    "classified_by_model": True, "classification_mode": "model", "full_review_required": False}
+        with patch.object(runtime.requests, "post") as post:
+            post.return_value.json.return_value = response
+            verdict, model, metadata = runtime.classify_with_codex(self.payload, "filter", "body", 180)
+        self.assertFalse(verdict)
+        self.assertEqual(model, "actual-model")
+        for key in ("reason", "cached", "cache_key", "usage"):
+            self.assertEqual(metadata[key], response[key])
+        self.assertEqual(metadata["reason_status"], "recorded")
+
+    def test_pass_and_reject_audits_preserve_reason_original_hash_and_input_identity(self):
+        metadata = {"reason": "Observed source evidence.", "reason_status": "recorded", "classified_by_model": True,
+                    "classification_mode": "model", "cached": False, "cache_key": "actual-cache-key"}
+        self.payload["raw_sha256"] = "untrusted claim"
+        for module, stage in ((filter_worker, "filter"), (fast_worker, "fast")):
+            for verdict in (True, False):
+                with self.subTest(stage=stage, verdict=verdict), \
+                        patch.object(module, "classify_with_codex", return_value=(verdict, "test-model", metadata)):
+                    events = []
+                    producer = Producer(events)
+                    module.process_record(self.msg, self.payload, self.args, producer, Consumer(events))
+                    event = json.loads(producer.records[-1]["value"])
+                    self.assertEqual(event["event_id"], runtime.digest_json({"stage": stage, "input": {
+                        "topic": "input", "partition": 1, "offset": 42}}))
+                    self.assertEqual(event["raw_sha256"], runtime.digest_json(self.payload["raw"]))
+                    self.assertEqual(event["input_payload_sha256"], runtime.digest_json(self.payload))
+                    self.assertEqual(event["source_id"], "item-1")
+                    self.assertEqual(event["reason"], metadata["reason"])
+                    self.assertEqual(event["outcome"], "pass" if verdict else "reject")
+                    self.assertEqual(event["output"], {"topic": "output", "partition": 2, "offset": 99} if verdict else None)
+                    self.assertLessEqual(event["started_at"], event["completed_at"])
+                    self.assertLessEqual(event["completed_at"], event["recorded_at"])
+                    self.assertEqual(events[-3:], ["produce", "ack", "commit"])
+
+    def test_failed_audit_ack_never_commits_positive_or_negative_input(self):
+        for module in (filter_worker, fast_worker):
+            for verdict in (True, False):
+                with self.subTest(worker=module.__name__, verdict=verdict), \
+                        patch.object(module, "classify_with_codex", return_value=(verdict, "test", {"reason": "Recorded reason"})):
+                    events = []
+                    producer = Producer(events, error="audit broker rejected", fail_topic="routing_events")
+                    with self.assertRaisesRegex(RuntimeError, "audit broker rejected"):
+                        module.process_record(self.msg, self.payload, self.args, producer, Consumer(events))
+                    self.assertNotIn("commit", events)
+                    self.assertEqual(producer.record["topic"], "routing_events")
+
+    def test_heuristic_and_gemini_without_reasons_explicitly_record_absence(self):
+        for module in (filter_worker, fast_worker):
+            for provider in ("gemini", "local"):
+                with self.subTest(worker=module.__name__, provider=provider), \
+                        patch.object(module, "get_gemini_yes_no", return_value=False):
+                    self.args.llm_provider = provider
+                    producer = Producer([])
+                    module.process_record(self.msg, self.payload, self.args, producer, Consumer([]))
+                    event = json.loads(producer.record["value"])
+                    self.assertIsNone(event["reason"])
+                    self.assertEqual(event["reason_status"], "not_recorded")
+                    self.assertEqual(event["classifier"]["classified_by_model"], provider == "gemini")
+
+    def test_invalid_json_rejection_is_audited_before_commit(self):
+        self.msg.value.return_value = b"not-json"
+        events = []
+        producer = Producer(events)
+        runtime.reject_invalid_record(self.msg, producer, Consumer(events), stage="fast", topic="routing_events")
+        event = json.loads(producer.record["value"])
+        self.assertEqual(event["classifier"]["classification_mode"], "invalid_json")
+        self.assertEqual(event["original_hash_status"], "not_recorded")
+        self.assertIsNone(event["raw_sha256"])
+        self.assertEqual(events, ["produce", "ack", "commit"])
+
+    def test_only_valid_actual_traceparent_is_retained(self):
+        header = "00-0123456789abcdef0123456789abcdef-0123456789abcdef-01"
+        self.msg.headers.return_value = [("traceparent", header.encode())]
+        context = runtime.trace_context(self.msg)
+        self.assertEqual(context["traceparent"], header)
+        self.assertEqual(context["status"], "propagated_header_only")
+        for value in (b"invalid", b"00-00000000000000000000000000000000-0123456789abcdef-01"):
+            self.msg.headers.return_value = [("traceparent", value)]
+            self.assertIsNone(runtime.trace_context(self.msg))
+
+    def test_audit_topic_creation_is_idempotent_but_other_errors_propagate(self):
+        with patch.object(runtime, "AdminClient") as admin:
+            runtime.ensure_routing_topic("kafka", "routing_events")
+            topic = admin.return_value.create_topics.call_args.args[0][0]
+            self.assertEqual((topic.topic, topic.num_partitions, topic.replication_factor), ("routing_events", 6, 3))
+            future = admin.return_value.create_topics.return_value["routing_events"]
+            from confluent_kafka import KafkaException, KafkaError
+            future.result.side_effect = KafkaException(KafkaError(KafkaError.TOPIC_ALREADY_EXISTS))
+            runtime.ensure_routing_topic("kafka", "routing_events")
+            future.result.side_effect = RuntimeError("offline")
+            with self.assertRaisesRegex(RuntimeError, "offline"):
+                runtime.ensure_routing_topic("kafka", "routing_events")
 
     def test_retry_holds_current_record_until_success(self):
         op = Mock(side_effect=[RuntimeError("first failure"), RuntimeError("second failure"), None])
@@ -139,6 +250,7 @@ class ReliabilityTests(unittest.TestCase):
         with patch.object(filter_worker, "parse_args", return_value=args), \
              patch.object(filter_worker, "Consumer", return_value=consumer), \
              patch.object(filter_worker, "Producer", return_value=producer), \
+             patch.object(filter_worker, "ensure_routing_topic"), \
              patch.object(filter_worker, "start_http_server"), \
              patch.object(filter_worker.signal, "signal", side_effect=lambda _, fn: handlers.append(fn)), \
              patch.object(filter_worker, "process_record", side_effect=lambda *args: handlers[0]()) as process:
@@ -178,7 +290,7 @@ class ReliabilityTests(unittest.TestCase):
             events = []
             filter_worker.process_record(self.msg, self.payload, self.args, Producer(events), Consumer(events))
             classifier.assert_not_called()
-            self.assertEqual(events, ["produce", "ack", "commit"])
+            self.assertEqual(events, ["produce", "ack", "produce", "ack", "commit"])
 
     def test_batch_stops_before_later_offset_when_current_record_fails(self):
         later = Mock()

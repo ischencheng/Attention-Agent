@@ -12,7 +12,8 @@ from typing import Any
 import requests
 from confluent_kafka import Consumer, KafkaException, Producer
 from prometheus_client import Counter, Histogram, start_http_server
-from worker_runtime import classify_with_codex, consumer_config, producer_config, produce_confirmed, retry_record
+from worker_runtime import (classify_with_codex, consumer_config, producer_config, produce_confirmed, retry_record,
+                            ensure_routing_topic, publish_routing_event, reject_invalid_record, routing_event, utcnow)
 
 
 LOGGER = logging.getLogger("local-ml-filter")
@@ -25,6 +26,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--bootstrap", default="kafka1:19092,kafka2:19092,kafka3:19092")
     parser.add_argument("--input-topic", default="source_clean")
     parser.add_argument("--output-topic", default="fastagent_input")
+    parser.add_argument("--routing-topic", default=os.getenv("ROUTING_EVENTS_TOPIC", "routing_events"))
     parser.add_argument("--group-id", default="local-ml-filter-v1")
     parser.add_argument("--threshold", type=float, default=0.55)
     parser.add_argument("--metrics-port", type=int, default=8031)
@@ -163,25 +165,39 @@ def get_gemini_yes_no(payload: dict[str, Any], model: str, api_key: str, timeout
 def process_record(msg: Any, payload: dict[str, Any], args: argparse.Namespace,
                    producer: Producer, consumer: Consumer) -> None:
     with FILTER_LATENCY.time():
+        started_at = utcnow()
         model_used = "local_heuristic"
-        classification_metadata = {}
+        classification_metadata = {"classified_by_model": False, "classification_mode": "local_threshold",
+                                   "score": get_relevance_score(payload), "threshold": args.threshold,
+                                   "reason": None, "reason_status": "not_recorded"}
         if payload.get("content_type") == "price_tick":
             is_yes, model_used = True, "price_tick_passthrough"
+            classification_metadata = {"classified_by_model": False, "classification_mode": "price_tick_passthrough",
+                                       "reason": None, "reason_status": "not_recorded"}
         elif args.llm_provider == "codex":
             is_yes, model_used, classification_metadata = classify_with_codex(payload, "filter", build_message_text(payload), args.llm_timeout_seconds)
         elif args.llm_provider == "gemini":
             is_yes = get_gemini_yes_no(payload, args.llm_model, args.llm_api_key, args.llm_timeout_seconds)
             model_used = args.llm_model
+            classification_metadata = {"classified_by_model": True, "classification_mode": "model",
+                                       "reason": None, "reason_status": "not_recorded"}
             if is_yes is None:
                 raise ValueError("Gemini classification unavailable or invalid; no heuristic fallback")
         else:
             is_yes = get_relevance_score(payload) >= args.threshold
+        completed_at = utcnow()
+        classifier = {"provider": args.llm_provider, "model": model_used, **classification_metadata}
+        output_ack = None
         if is_yes:
             output = dict(payload)
-            output["local_ml_filter"] = {"verdict": True, "score": 1.0, "provider": args.llm_provider, "model": model_used, **classification_metadata}
-            produce_confirmed(producer, topic=args.output_topic,
+            output["local_ml_filter"] = {"verdict": True, "score": 1.0, **classifier}
+            output_ack = produce_confirmed(producer, topic=args.output_topic,
                               key=derive_message_key(payload, msg.key()).encode("utf-8"),
                               value=json.dumps(output, ensure_ascii=False).encode("utf-8"), headers=msg.headers())
+        event = routing_event(msg, payload, stage="filter", verdict=is_yes, classifier=classifier,
+                              started_at=started_at, completed_at=completed_at,
+                              output_topic=args.output_topic, output=output_ack)
+        publish_routing_event(producer, event, args.routing_topic)
         consumer.commit(message=msg, asynchronous=False)
         FILTERED_TOTAL.labels("yes" if is_yes else "no").inc()
 
@@ -198,6 +214,7 @@ def main() -> None:
     logging.basicConfig(level=getattr(logging, args.log_level.upper(), logging.INFO),
                         format="%(asctime)s %(levelname)s %(name)s %(message)s")
     start_http_server(args.metrics_port)
+    ensure_routing_topic(args.bootstrap, args.routing_topic)
     consumer = Consumer(consumer_config(args.bootstrap, args.group_id))
     producer = Producer(producer_config(args.bootstrap))
     running = True
@@ -224,7 +241,7 @@ def main() -> None:
             if payload is None:
                 # Invalid inputs are explicit drops; a commit failure is still retried in order.
                 LOGGER.warning("invalid JSON payload at %s/%s/%s", msg.topic(), msg.partition(), msg.offset())
-                operation = lambda: consumer.commit(message=msg, asynchronous=False)
+                operation = lambda: reject_invalid_record(msg, producer, consumer, stage="filter", topic=args.routing_topic)
             else:
                 operation = lambda: process_record(msg, payload, args, producer, consumer)
             if not retry_record(operation, lambda: running):

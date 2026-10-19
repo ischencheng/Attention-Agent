@@ -12,7 +12,8 @@ from typing import Any
 import requests
 from confluent_kafka import Consumer, KafkaError, KafkaException, Producer
 from prometheus_client import Counter, start_http_server
-from worker_runtime import classify_with_codex, consumer_config, producer_config, produce_confirmed, retry_record
+from worker_runtime import (classify_with_codex, consumer_config, producer_config, produce_confirmed, retry_record,
+                            ensure_routing_topic, publish_routing_event, reject_invalid_record, routing_event, utcnow)
 
 
 LOGGER = logging.getLogger("fast-agent")
@@ -26,6 +27,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--bootstrap", default="kafka1:19092,kafka2:19092,kafka3:19092")
     parser.add_argument("--input-topic", default="fastagent_input")
     parser.add_argument("--output-topic", default="attention_ticket")
+    parser.add_argument("--routing-topic", default=os.getenv("ROUTING_EVENTS_TOPIC", "routing_events"))
     parser.add_argument("--group-id", default="fast-agent-v1")
     parser.add_argument("--metrics-port", type=int, default=8030)
     parser.add_argument("--poll-timeout-seconds", type=float, default=1.0)
@@ -130,27 +132,47 @@ def get_gemini_yes_no(payload: dict[str, Any], model: str, api_key: str, timeout
 
 def process_record(msg: Any, payload: dict[str, Any], args: argparse.Namespace,
                    producer: Producer, consumer: Consumer) -> None:
+    started_at = utcnow()
     source_id = extract_source_id(payload)
     if not source_id or payload.get("content_type") == "price_tick":
+        event = routing_event(msg, payload, stage="fast", verdict=False,
+                              classifier={"provider": "routing-policy", "model": None, "classified_by_model": False,
+                                          "classification_mode": "missing_source_id" if not source_id else "price_tick_skipped",
+                                          "reason": None, "reason_status": "not_recorded"},
+                              started_at=started_at, completed_at=utcnow())
+        publish_routing_event(producer, event, args.routing_topic)
         consumer.commit(message=msg, asynchronous=False)
         return
     model_used = "local_heuristic"
-    classification_metadata = {}
+    classification_metadata = {"classified_by_model": False, "classification_mode": "local_threshold",
+                               "threshold": args.attention_threshold,
+                               "reason": None, "reason_status": "not_recorded"}
     if args.llm_provider == "codex":
         is_yes, model_used, classification_metadata = classify_with_codex(payload, "fast", build_message_text(payload), args.llm_timeout_seconds)
     elif args.llm_provider == "gemini":
         is_yes = get_gemini_yes_no(payload, args.llm_model, args.llm_api_key, args.llm_timeout_seconds)
         model_used = args.llm_model
+        classification_metadata = {"classified_by_model": True, "classification_mode": "model",
+                                   "reason": None, "reason_status": "not_recorded"}
         if is_yes is None:
             raise ValueError("Gemini classification unavailable or invalid; no heuristic fallback")
     else:
-        is_yes = local_score(payload) >= args.attention_threshold
+        score = local_score(payload)
+        is_yes = score >= args.attention_threshold
+        classification_metadata["score"] = score
+    completed_at = utcnow()
+    classifier = {"provider": args.llm_provider, "model": model_used, **classification_metadata}
+    output_ack = None
     if is_yes:
         output = dict(payload)
         output["verdict"] = "yes"
-        output["fast_agent"] = {"provider": args.llm_provider, "model": model_used, **classification_metadata}
-        produce_confirmed(producer, topic=args.output_topic, key=source_id.encode("utf-8"),
+        output["fast_agent"] = classifier
+        output_ack = produce_confirmed(producer, topic=args.output_topic, key=source_id.encode("utf-8"),
                           value=json.dumps(output, ensure_ascii=False).encode("utf-8"), headers=msg.headers())
+    event = routing_event(msg, payload, stage="fast", verdict=is_yes, classifier=classifier,
+                          started_at=started_at, completed_at=completed_at,
+                          output_topic=args.output_topic, output=output_ack)
+    publish_routing_event(producer, event, args.routing_topic)
     consumer.commit(message=msg, asynchronous=False)
     FAST_AGENT_OUTPUT_TOTAL.labels("success" if is_yes else "filtered").inc()
 
@@ -160,6 +182,7 @@ def main() -> None:
     logging.basicConfig(level=getattr(logging, args.log_level.upper(), logging.INFO),
                         format="%(asctime)s %(levelname)s %(name)s %(message)s")
     start_http_server(args.metrics_port)
+    ensure_routing_topic(args.bootstrap, args.routing_topic)
     consumer = Consumer(consumer_config(args.bootstrap, args.group_id))
     producer = Producer(producer_config(args.bootstrap))
     consumer.subscribe([args.input_topic])
@@ -186,7 +209,7 @@ def main() -> None:
             payload = decode_payload(msg.value())
             if payload is None:
                 FAST_AGENT_OUTPUT_TOTAL.labels("invalid_payload").inc()
-                operation = lambda: consumer.commit(message=msg, asynchronous=False)
+                operation = lambda: reject_invalid_record(msg, producer, consumer, stage="fast", topic=args.routing_topic)
             else:
                 operation = lambda: process_record(msg, payload, args, producer, consumer)
             if not retry_record(operation, lambda: running):
