@@ -3,9 +3,18 @@ FROM flink:1.19.1-scala_2.12-java17
 USER root
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends python3 python3-pip ca-certificates curl \
+    && apt-get install -y --no-install-recommends \
+        python3 python3-pip python3-dev build-essential openjdk-17-jdk-headless \
+        ca-certificates curl \
     && ln -sf /usr/bin/python3 /usr/bin/python \
+    && ln -s "/usr/lib/jvm/java-17-openjdk-$(dpkg --print-architecture)" /opt/java/build-jdk \
     && rm -rf /var/lib/apt/lists/*
+
+# The upstream image supplies a JRE. PyFlink's pemja dependency compiles JNI
+# extensions on ARM64 and needs both the JDK headers and the Python C headers.
+# Keep a stable, architecture-independent path for build and runtime discovery.
+ENV JAVA_HOME=/opt/java/build-jdk
+ENV PATH="${JAVA_HOME}/bin:${PATH}"
 
 COPY requirements.txt /tmp/requirements.txt
 RUN pip3 install --no-cache-dir -r /tmp/requirements.txt
