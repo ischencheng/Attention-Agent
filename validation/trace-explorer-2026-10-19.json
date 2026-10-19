@@ -1,0 +1,267 @@
+{
+  "observed_at": "2026-10-19T05:41:07.245127+00:00",
+  "mode": "actual_local_production_observation",
+  "book_reference_commit": "dbc046eb896ac4e39aa19c7774c8bf49583b89a6",
+  "tests": {
+    "runtime_unit_tests_passed": 88,
+    "frontend_semantic_tests_passed": 7,
+    "frontend_production_build": "passed",
+    "api_container_build": "passed"
+  },
+  "research": {
+    "thesis_id": "fed-enforcement-termination-2026-10-16",
+    "node_ids": [
+      "research:claude-strong:fed-enforcement-termination-2026-10-16",
+      "annotation:1",
+      "ticket:5",
+      "raw:3"
+    ],
+    "edges": [
+      {
+        "source": "raw:3",
+        "target": "ticket:5",
+        "relation": "same_original",
+        "verification": "source_identity_and_raw_sha256"
+      },
+      {
+        "source": "ticket:5",
+        "target": "annotation:1",
+        "relation": "referenced_by_annotation",
+        "verification": "declared_reference"
+      },
+      {
+        "source": "raw:3",
+        "target": "annotation:1",
+        "relation": "cited_original",
+        "verification": "declared_reference"
+      },
+      {
+        "source": "annotation:1",
+        "target": "research:claude-strong:fed-enforcement-termination-2026-10-16",
+        "relation": "supports",
+        "verification": "application_declared_reference"
+      },
+      {
+        "source": "raw:3",
+        "target": "research:claude-strong:fed-enforcement-termination-2026-10-16",
+        "relation": "supports",
+        "verification": "application_declared_reference"
+      }
+    ],
+    "evaluation_status": "unscored_application_research",
+    "versions": [
+      {
+        "version": 2,
+        "frozen_at": "2026-10-19T05:37:01.149597+00:00",
+        "updated_at": "2026-10-19T05:36:57.642452+00:00",
+        "state_sha256": "3fd0e6a8cb9930dc5a8ae01650b589f102c5e99e221a17fc4e6975c406c02365",
+        "hash": "cc257a24f20874d117d72c8d45f8577e8dcc5629fb0c5185d3135211b7cd85c5",
+        "entry_hash_verified": true
+      },
+      {
+        "version": 1,
+        "frozen_at": "2026-10-19T05:12:04.637641+00:00",
+        "updated_at": "2026-10-19T04:59:12.751776+00:00",
+        "state_sha256": "40aa0ab36d0598550807b41de3dba41fb4d905e983c2dbf504e7dee6ca822cc2",
+        "hash": "12f88ca2e5e93a2668421469b91b0505c0a109dbdf1c737d5be410c28628baed",
+        "entry_hash_verified": true
+      }
+    ],
+    "archive_projection": {
+      "format_version": 1,
+      "captured_at": "2026-10-19T05:41:00.181102+00:00",
+      "source_sequence": 39,
+      "latest_entry_recorded_at": "2026-10-19T05:40:59.960879+00:00",
+      "publication_method": "sqlite_backup_atomic_replace",
+      "status": "available",
+      "age_seconds": 7.0,
+      "stale": false
+    }
+  },
+  "routing": {
+    "raw_message_id": 318,
+    "edges": [
+      {
+        "source": "raw:318",
+        "target": "routing:2",
+        "relation": "same_original",
+        "verification": "source_identity_and_raw_sha256"
+      },
+      {
+        "source": "raw:318",
+        "target": "routing:1",
+        "relation": "same_original",
+        "verification": "source_identity_and_raw_sha256"
+      },
+      {
+        "source": "routing:1",
+        "target": "routing:2",
+        "relation": "forwarded_input",
+        "verification": "broker_coordinates"
+      }
+    ],
+    "expected_path": "filter pass followed by Fast reject"
+  },
+  "cycles": [
+    {
+      "cycle_id": "20261019T053642431830Z-strong-8f022c44",
+      "role": "strong",
+      "status": "no_new_information",
+      "started_at": "2026-10-19T05:36:42.431990+00:00",
+      "completed_at": "2026-10-19T05:37:00.664848+00:00",
+      "selected_input_ids": [],
+      "reviewed_input_ids": [],
+      "published_count": 0,
+      "state_verified": true,
+      "tool_event_count": 10,
+      "tool_timing_status": "not_recorded",
+      "usage": {
+        "input_tokens": 128993,
+        "cached_input_tokens": 93952,
+        "output_tokens": 842,
+        "reasoning_output_tokens": 39
+      }
+    },
+    {
+      "cycle_id": "20261019T053554510111Z-mid-88d3e423",
+      "role": "mid",
+      "status": "completed",
+      "started_at": "2026-10-19T05:35:54.510245+00:00",
+      "completed_at": "2026-10-19T05:37:14.064637+00:00",
+      "selected_input_ids": [
+        35,
+        36,
+        37,
+        38,
+        39,
+        40,
+        41,
+        42,
+        43,
+        44,
+        45,
+        46,
+        47,
+        48,
+        49,
+        50,
+        51,
+        52,
+        53,
+        54
+      ],
+      "reviewed_input_ids": [
+        35,
+        36,
+        37,
+        38,
+        39,
+        40,
+        41,
+        42,
+        43,
+        44,
+        45,
+        46,
+        47,
+        48,
+        49,
+        50,
+        51,
+        52,
+        53,
+        54
+      ],
+      "published_count": 1,
+      "state_verified": true,
+      "tool_event_count": 20,
+      "tool_timing_status": "not_recorded",
+      "usage": {
+        "input_tokens": 469711,
+        "cached_input_tokens": 390784,
+        "output_tokens": 3998,
+        "reasoning_output_tokens": 88
+      }
+    },
+    {
+      "cycle_id": "20261019T053129483297Z-mid-a40b11f3",
+      "role": "mid",
+      "status": "completed",
+      "started_at": "2026-10-19T05:31:29.483469+00:00",
+      "completed_at": "2026-10-19T05:32:34.058341+00:00",
+      "selected_input_ids": [
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34
+      ],
+      "reviewed_input_ids": [
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34
+      ],
+      "published_count": 0,
+      "state_verified": true,
+      "tool_event_count": 12,
+      "tool_timing_status": "not_recorded",
+      "usage": {
+        "input_tokens": 238673,
+        "cached_input_tokens": 176000,
+        "output_tokens": 3368,
+        "reasoning_output_tokens": 88
+      }
+    }
+  ],
+  "browser_verified": [
+    "Evidence stages",
+    "Current state and invalidation conditions",
+    "Revision history",
+    "Frozen versions and matching hashes",
+    "Archive capture and freshness",
+    "Mid publication gate and open questions",
+    "Actual filter pass and Fast reject reasons",
+    "Broker-coordinate link",
+    "Real Mid and Strong cycle summaries and safe tool events"
+  ],
+  "unknown_record_http_status": 404,
+  "limitations": [
+    "Historical missing routing reasons are not reconstructed.",
+    "Per-tool timing was not recorded.",
+    "A completed cycle and matching hashes do not establish forecast quality.",
+    "No production investment decision or resolved market forecast at this capture.",
+    "Local services require the Mac and Docker to remain available."
+  ]
+}
