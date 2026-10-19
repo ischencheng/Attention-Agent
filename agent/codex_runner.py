@@ -234,16 +234,18 @@ def run(prompt, schema, cwd, output_dir, timeout, model=None, *,
                 with _ACTIVE_LOCK:
                     _ACTIVE_PROCESSES.discard(process)
             metadata["returncode"] = process.returncode
-        for line_number, line in enumerate((output_dir / "events.jsonl").read_text().splitlines(), 1):
-            if not line.strip():
-                continue
-            try:
-                event = json.loads(line)
-            except json.JSONDecodeError as exc:
-                raise CodexRunError(f"Invalid JSONL event at line {line_number}: {exc}", output_dir, process.returncode) from exc
-            if not isinstance(event, dict) or not isinstance(event.get("type"), str):
-                raise CodexRunError(f"Malformed Codex event at line {line_number}", output_dir, process.returncode)
-            events.append(event)
+        # Unicode separators inside JSON strings are data, not JSONL boundaries.
+        with (output_dir / "events.jsonl").open() as stream:
+            for line_number, line in enumerate(stream, 1):
+                if not line.strip():
+                    continue
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError as exc:
+                    raise CodexRunError(f"Invalid JSONL event at line {line_number}: {exc}", output_dir, process.returncode) from exc
+                if not isinstance(event, dict) or not isinstance(event.get("type"), str):
+                    raise CodexRunError(f"Malformed Codex event at line {line_number}", output_dir, process.returncode)
+                events.append(event)
         usage = {}
         for event in events:
             if event.get("type") == "turn.completed" and isinstance(event.get("usage"), dict):
