@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "issue": "https://github.com/ischencheng/Attention-Agent/issues/13",
+  "evidence_kind": "historical_live_runtime_baseline",
+  "observed_at": "2026-10-19T06:16:50.655985+00:00",
+  "capture_scope": "Read-only aggregate of the active local gateway cache and its linked Codex run artifacts; no source bodies, credentials, prompts, transcripts or raw records are included.",
+  "runtime_changed": false,
+  "methodology": {
+    "cache_path": "environments/attention_judgment/runs/local-pipeline/gateway-cache.sqlite3",
+    "connection": "SQLite URI mode=ro",
+    "selection": "SELECT request_json,response_json,artifact_path FROM cache WHERE kind='classify' AND artifact_path IS NOT NULL",
+    "leaf_request_limit_characters": 16000,
+    "matching": "Decode request_json; exclude message lengths above 16000; remove role; serialize the remaining request with Python json.dumps(sort_keys=True,separators=(',',':')) using its default ensure_ascii=True; SHA-256 that UTF-8 string; group by response_json.model and the resulting digest; retain groups containing both filter and fast.",
+    "counting": "For each matched role, read artifact_path/run.json and count success=true. Sum the integer fields reported in run.json.usage. Count turn.completed events in that artifact's events.jsonl without retaining or displaying event bodies.",
+    "matching_limit": "The capture grouped by request fields and model, not by prompt version or research-context hash. If multiple cache entries have the same model/request/role, the last fetched row supplies that role. This is descriptive evidence, not a version-controlled benchmark.",
+    "time_boundary": "observed_at was emitted at the end of the capture. SQLite rows were fetched first, then immutable completed artifacts were read; the runtime remained active and this is not an atomic cross-file snapshot.",
+    "usage_interpretation": "Preserve named usage counters as reported. Do not add cached_input_tokens to input_tokens or treat cached response usage as new work. No dollar conversion was performed."
+  },
+  "matched_leaf_samples": [
+    {
+      "model": "gpt-6.1-sol",
+      "matched_leaf_request_pairs": 255,
+      "filter": {
+        "successful_codex_invocations": 255,
+        "recorded_completed_turns": 255,
+        "reported_usage": {
+          "input_tokens": 859968,
+          "cached_input_tokens": 525440,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 11697,
+          "reasoning_output_tokens": 549
+        }
+      },
+      "fast": {
+        "successful_codex_invocations": 255,
+        "recorded_completed_turns": 255,
+        "reported_usage": {
+          "input_tokens": 856816,
+          "cached_input_tokens": 505216,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 14204,
+          "reasoning_output_tokens": 1142
+        }
+      }
+    },
+    {
+      "model": "gpt-6-luna",
+      "matched_leaf_request_pairs": 89,
+      "filter": {
+        "successful_codex_invocations": 89,
+        "recorded_completed_turns": 89,
+        "reported_usage": {
+          "input_tokens": 240448,
+          "cached_input_tokens": 181376,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 4078,
+          "reasoning_output_tokens": 611
+        }
+      },
+      "fast": {
+        "successful_codex_invocations": 89,
+        "recorded_completed_turns": 89,
+        "reported_usage": {
+          "input_tokens": 244453,
+          "cached_input_tokens": 152064,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 6603,
+          "reasoning_output_tokens": 2393
+        }
+      }
+    }
+  ],
+  "supported_observation": "These matched leaf requests were classified separately by both filter and Fast, with one recorded completed turn in each successful artifact.",
+  "not_measured": [
+    "Post-change production call counts or token usage",
+    "Exact billable backend request counts or dollar cost",
+    "Controlled before/after savings, latency, quality or downstream load",
+    "Distinct original-record counts for this leaf-request sample",
+    "All failed attempts or their potentially unreported usage"
+  ],
+  "caveats": [
+    "Leaf requests can be chunks of a longer original; the sample is not a count of short original records.",
+    "Only requests with both stages present enter the sample. Historical first-filter rejections are excluded.",
+    "A cache hit replays previously recorded usage; summing routing-event usage overcounts fresh model work.",
+    "Aggregate long-source cache rows have no artifact_path; cache row totals are not model-call totals.",
+    "Failed or rejected classifier attempts may leave run artifacts without a cache row; the matched successful sample excludes them.",
+    "A successful Codex invocation and completed turn do not establish the number of internal transport retries or billable backend requests.",
+    "Model, request, research-context or prompt-version changes invalidate gateway cache keys independently.",
+    "Removing a broad gate can increase embedding and later-stage traffic. This baseline does not establish total pipeline savings."
+  ]
+}

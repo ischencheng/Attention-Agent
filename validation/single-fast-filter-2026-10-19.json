@@ -1,0 +1,277 @@
+{
+  "observed_at": "2026-10-19T06:23:40.597831+00:00",
+  "issue": "https://github.com/ischencheng/Attention-Agent/issues/13",
+  "mode": "actual_production_observation",
+  "cutover": {
+    "captured_at": "2026-10-19T06:21:32.530983+00:00",
+    "workers": {
+      "local-ml-filter-v1": {
+        "topic": "source_clean",
+        "committed_next_offsets": {
+          "0": 176,
+          "1": 157,
+          "2": -1001,
+          "3": 198,
+          "4": 188,
+          "5": 189
+        },
+        "maximum_persisted_audit_offsets": {
+          "0": 175,
+          "1": 156,
+          "3": 197,
+          "5": 188
+        },
+        "no_audited_uncommitted_input": true
+      },
+      "fast-agent-v1": {
+        "topic": "fastagent_input",
+        "committed_next_offsets": {
+          "0": 483
+        },
+        "maximum_persisted_audit_offsets": {
+          "0": 482
+        },
+        "no_audited_uncommitted_input": true
+      }
+    },
+    "active_cycles_before_restart": {},
+    "configured_models": {
+      "CODEX_GATEWAY_MODEL": "gpt-6-luna",
+      "CLASSIFICATION_MODEL": null,
+      "MID_CODEX_MODEL": "gpt-6-luna",
+      "STRONG_CODEX_MODEL": "gpt-6.1-sol"
+    }
+  },
+  "samples": [
+    {
+      "raw_record_ids": [
+        642
+      ],
+      "source": "twitter",
+      "source_id": "twitter-2112059174855262250",
+      "raw_sha256": "910745dae58571c092e94e5de458c1210cb1e67b72468836440a9dd9e1087379",
+      "relay": {
+        "id": 931,
+        "input": {
+          "topic": "source_clean",
+          "offset": 188,
+          "partition": 4
+        },
+        "output": {
+          "topic": "fastagent_input",
+          "offset": 484,
+          "partition": 0
+        },
+        "classifier": {
+          "model": null,
+          "usage": null,
+          "reason": "Forwarded unchanged to Fast, the single model relevance gate.",
+          "provider": "routing-policy",
+          "reason_status": "recorded",
+          "classification_mode": "relay",
+          "classified_by_model": false
+        }
+      },
+      "fast": {
+        "id": 1218,
+        "input": {
+          "topic": "fastagent_input",
+          "offset": 484,
+          "partition": 0
+        },
+        "outcome": "reject",
+        "reason": "The post contains no concrete information relevant to the research topics.",
+        "classifier": {
+          "model": "gpt-6-luna",
+          "usage": {
+            "input_tokens": 2723,
+            "output_tokens": 31,
+            "cached_input_tokens": 2048,
+            "reasoning_output_tokens": 0,
+            "cache_write_input_tokens": 0
+          },
+          "cached": false,
+          "reason": "The post contains no concrete information relevant to the research topics.",
+          "provider": "codex",
+          "cache_key": "4a4c2d42ac1cee73d9da0967fd1eeb0a65696b130050a98b0b47915cadeb5ea5",
+          "reason_status": "recorded",
+          "classification_mode": "model",
+          "classified_by_model": true,
+          "full_review_required": false
+        }
+      },
+      "value_key_headers_preserved": true,
+      "original_hash_verified": true,
+      "api_trace_has_both_events": true,
+      "model_execution": {
+        "artifact": "environments/attention_judgment/runs/local-pipeline/codex-runs/fast-20261019T062157Z-0b0ae09e87",
+        "model": "gpt-6-luna",
+        "success": true,
+        "completed_turns": 1,
+        "tool_items": 0,
+        "message_characters": 31,
+        "matching_new_attempts": 1,
+        "usage": {
+          "input_tokens": 2723,
+          "cached_input_tokens": 2048,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 31,
+          "reasoning_output_tokens": 0
+        },
+        "new_prompt_verified": true
+      }
+    }
+  ],
+  "routing_counts": [
+    {
+      "stage": "fast",
+      "outcome": "pass",
+      "count": 119
+    },
+    {
+      "stage": "fast",
+      "outcome": "reject",
+      "count": 232
+    },
+    {
+      "stage": "filter",
+      "outcome": "pass",
+      "count": 327
+    },
+    {
+      "stage": "filter",
+      "outcome": "reject",
+      "count": 277
+    },
+    {
+      "stage": "relay",
+      "outcome": "pass",
+      "count": 286
+    }
+  ],
+  "groups_after": {
+    "local-ml-filter-v1": {
+      "topic": "source_clean",
+      "committed_next_offsets": {
+        "0": 188,
+        "1": 173,
+        "2": 213,
+        "3": 212,
+        "4": 203,
+        "5": 205
+      }
+    },
+    "fast-agent-v1": {
+      "topic": "fastagent_input",
+      "committed_next_offsets": {
+        "0": 508
+      }
+    },
+    "embed-worker-v2": {
+      "topic": "fastagent_input",
+      "committed_next_offsets": {
+        "0": 509
+      }
+    }
+  },
+  "overview_after": {
+    "raw_count": 677,
+    "clean_count": 1194,
+    "ticket_count": 163,
+    "annotation_count": 2,
+    "decision_count": 0,
+    "embedding_count": 509,
+    "sources": {
+      "Federal Reserve releases": 5,
+      "OpenAI news": 22,
+      "twitter": 630,
+      "sec_edgar": 3,
+      "AMD investor releases": 1,
+      "NVIDIA official blog": 16
+    },
+    "agents": [
+      {
+        "agent_id": "claude-mid",
+        "updated_at": "2026-10-19T06:22:22.188800Z",
+        "pending_theme_count": 56,
+        "thesis_count": 0,
+        "role": "mid"
+      },
+      {
+        "agent_id": "claude-strong",
+        "updated_at": "2026-10-19T05:54:17.042356Z",
+        "pending_theme_count": 0,
+        "thesis_count": 2,
+        "role": "strong"
+      }
+    ]
+  },
+  "gateway": {
+    "cached_responses": {
+      "classify": 1122,
+      "embed": 358
+    },
+    "classification_model": "gpt-6-luna",
+    "embedding_loaded": true,
+    "embedding_model": "sentence-transformers/all-mpnet-base-v2",
+    "status": "ok"
+  },
+  "checks": {
+    "backend_tests": 112,
+    "frontend_tests": 11,
+    "changed_images_built": true,
+    "committed_offsets_not_reset": true
+  },
+  "limitations": [
+    "Live samples verify engineering behavior, not investment correctness or aggregate token/dollar savings.",
+    "Historical upstream rejections were not replayed.",
+    "Long sources, retries and cached results do not imply one call per original."
+  ],
+  "mid_cycle": {
+    "cycle_id": "20261019T062136526850Z-mid-7c4e186d",
+    "model": "gpt-6-luna",
+    "status": "completed",
+    "completed_at": "2026-10-19T06:22:25.024462+00:00",
+    "state_verified": true,
+    "reviewed_input_ids": [
+      75,
+      76,
+      77,
+      78,
+      79,
+      80,
+      81,
+      82,
+      83,
+      84,
+      85,
+      86,
+      87,
+      88,
+      89,
+      90,
+      91,
+      92,
+      93,
+      94
+    ],
+    "published_count": 0,
+    "summary": "Verified matching raw originals for selected tickets 75–94, grouped them into pending themes, and deduplicated repeated posts and same-release items. No theme met the annotation publication gate. Durable state saved successfully.",
+    "usage": {
+      "input_tokens": 466843,
+      "cached_input_tokens": 405632,
+      "cache_write_input_tokens": 0,
+      "output_tokens": 5354,
+      "reasoning_output_tokens": 934
+    }
+  },
+  "browser_check": {
+    "verified": true,
+    "observations": [
+      "Input relay is labelled Forwarded / No model call.",
+      "The separate Fast card displays its actual Luna model and rejection reason.",
+      "Broker-coordinate evidence links remain visible."
+    ],
+    "screenshot": "environments/attention_judgment/runs/local-pipeline/single-fast-trace.png"
+  }
+}
