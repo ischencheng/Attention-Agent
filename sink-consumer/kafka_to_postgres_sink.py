@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import logging
 import signal
@@ -48,7 +49,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--topics",
-        default="source_raw,source_clean,vector_embedding,attention_ticket,annotations,decision_packet",
+        default="source_raw,source_clean,vector_embedding,attention_ticket,annotations,decision_packet,routing_events",
         help="Comma separated Kafka topics to consume.",
     )
     parser.add_argument(
@@ -186,8 +187,67 @@ def insert_vector_embedding_payload(cursor: Any, msg: Message, payload: dict[str
     )
 
 
+def routing_decision_hash(payload: dict[str, Any]) -> str:
+    """Retries may have different delivery times, cache hits and output offsets.
+
+    Deduplicate those attempts, but reject conflicting classifications or source
+    identities for the same stage/input. Never overwrite the first audit record.
+    """
+    classifier = {key: value for key, value in payload["classifier"].items() if key not in {"cached", "usage"}}
+    stable = {key: payload.get(key) for key in (
+        "schema_version", "event_id", "stage", "outcome", "verdict", "input", "output_topic",
+        "source", "source_id", "content_type", "raw_sha256", "original_hash_status",
+        "input_payload_sha256", "input_hash_kind", "reason", "reason_status")}
+    stable["classifier"] = classifier
+    return hashlib.sha256(json.dumps(stable, sort_keys=True, separators=(",", ":"),
+                                     ensure_ascii=False, allow_nan=False).encode("utf-8")).hexdigest()
+
+
+def insert_routing_event(cursor: Any, msg: Message, payload: dict[str, Any]) -> None:
+    coordinates = payload.get("input")
+    if (payload.get("schema_version") != 1 or payload.get("stage") not in {"filter", "fast"}
+            or type(payload.get("verdict")) is not bool
+            or payload.get("outcome") != ("pass" if payload["verdict"] else "reject")
+            or not isinstance(coordinates, dict) or set(coordinates) != {"topic", "partition", "offset"}
+            or not isinstance(coordinates["topic"], str)
+            or any(type(coordinates[key]) is not int or coordinates[key] < 0 for key in ("partition", "offset"))
+            or not isinstance(payload.get("classifier"), dict)):
+        raise ValueError("Invalid routing event identity or classification")
+    expected_id = hashlib.sha256(json.dumps({"stage": payload["stage"], "input": coordinates},
+                                            sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")).hexdigest()
+    if payload.get("event_id") != expected_id:
+        raise ValueError("Routing event ID does not match its stage and Kafka input")
+    reason = payload.get("reason")
+    expected_reason_status = "recorded" if isinstance(reason, str) and reason.strip() else "not_recorded"
+    if reason is not None and (not isinstance(reason, str) or not reason.strip()):
+        raise ValueError("Routing reason must be nonempty text or null")
+    if payload.get("reason_status") != expected_reason_status:
+        raise ValueError("Routing reason status does not match its recorded content")
+    decision_hash = routing_decision_hash(payload)
+    cursor.execute("""
+        INSERT INTO routing_events (
+            event_id, stage, outcome, input_topic, input_partition, input_offset,
+            kafka_topic, kafka_partition, kafka_offset, source, source_id, raw_sha256,
+            reason, reason_status, classifier, started_at, completed_at, recorded_at, decision_sha256, payload)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        ON CONFLICT DO NOTHING RETURNING event_id
+        """, (payload["event_id"], payload["stage"], payload["outcome"],
+              coordinates["topic"], coordinates["partition"], coordinates["offset"],
+              msg.topic(), msg.partition(), msg.offset(), payload.get("source"), payload.get("source_id"),
+              payload.get("raw_sha256"), reason, payload["reason_status"], Json(payload["classifier"]),
+              payload["started_at"], payload["completed_at"], payload["recorded_at"], decision_hash, Json(payload)))
+    if cursor.fetchone() is None:
+        cursor.execute("SELECT decision_sha256 FROM routing_events WHERE event_id=%s", (payload["event_id"],))
+        existing = cursor.fetchone()
+        if existing is None or existing[0] != decision_hash:
+            raise ValueError("Conflicting routing audit replay; preserving the original event")
+
+
 def route_and_insert(cursor: Any, msg: Message, payload: dict[str, Any]) -> bool:
     topic = msg.topic()
+    if topic == "routing_events":
+        insert_routing_event(cursor, msg, payload)
+        return True
     if topic == "vector_embedding":
         insert_vector_embedding_payload(cursor, msg, payload)
         return True

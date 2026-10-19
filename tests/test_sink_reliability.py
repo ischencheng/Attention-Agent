@@ -1,9 +1,11 @@
 """Sink failures must never let a later Kafka offset hide an unpersisted row."""
 from contextlib import ExitStack
+import copy
 import importlib.util
 import itertools
 from pathlib import Path
 import tempfile
+import sys
 from types import SimpleNamespace
 import unittest
 from unittest.mock import MagicMock, patch
@@ -16,6 +18,8 @@ ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("attention_sink", ROOT / "sink-consumer/kafka_to_postgres_sink.py")
 sink = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(sink)
+sys.path.insert(0, str(ROOT / "llm-worker"))
+from worker_runtime import routing_event
 
 
 def message(offset=1):
@@ -120,6 +124,101 @@ class SinkPostgresTests(unittest.TestCase):
             with conn.cursor() as cursor:
                 cursor.execute("SELECT kafka_offset, raw FROM raw_messages")
                 self.assertEqual(cursor.fetchall(), [(10, {"text": "original"})])
+
+
+class RoutingSinkPostgresTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.directory = tempfile.TemporaryDirectory(prefix="attention-routing-sink-tests-")
+        cls.server = pgserver.get_server(Path(cls.directory.name) / "postgres", cleanup_mode="stop")
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.cleanup()
+        cls.directory.cleanup()
+
+    def setUp(self):
+        self.conn = psycopg2.connect(self.server.get_uri())
+        with self.conn.cursor() as cursor:
+            cursor.execute((ROOT / "postgres/init/003_routing_events.sql").read_text())
+            cursor.execute("TRUNCATE routing_events")
+        self.conn.commit()
+        self.input = message(42)
+        self.input.topic.return_value = "fastagent_input"
+        self.input.headers.return_value = None
+        self.audit_message = message(100)
+        self.audit_message.topic.return_value = "routing_events"
+        self.payload = routing_event(
+            self.input, {"source": "rss", "source_id": "original-1", "raw": {"text": "Original evidence"}},
+            stage="fast", verdict=True,
+            classifier={"provider": "codex", "model": "actual-model", "classified_by_model": True,
+                        "classification_mode": "model", "cached": False, "usage": {"input_tokens": 100},
+                        "reason": "Contains original earnings evidence.", "reason_status": "recorded"},
+            started_at="2026-10-19T05:00:00Z", completed_at="2026-10-19T05:00:01Z",
+            output_topic="attention_ticket", output={"topic": "attention_ticket", "partition": 1, "offset": 50})
+
+    def tearDown(self):
+        self.conn.close()
+
+    def insert(self, payload, message=None):
+        with self.conn.cursor() as cursor:
+            self.assertTrue(sink.route_and_insert(cursor, message or self.audit_message, payload))
+        self.conn.commit()
+
+    def test_duplicate_attempts_keep_first_reason_and_broker_ack_identity(self):
+        self.insert(self.payload)
+        retry = copy.deepcopy(self.payload)
+        retry.update({"started_at": "2026-10-19T05:02:00Z", "completed_at": "2026-10-19T05:02:01Z",
+                      "recorded_at": "2026-10-19T05:02:02Z"})
+        retry["output"]["offset"] = 51
+        retry["classifier"].update({"cached": True, "usage": None})
+        self.audit_message.offset.return_value = 101
+        self.insert(retry)
+        self.insert(retry)
+        with self.conn.cursor() as cursor:
+            cursor.execute("SELECT event_id, reason, source, source_id, raw_sha256, kafka_offset, payload FROM routing_events")
+            rows = cursor.fetchall()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0][:6], (self.payload["event_id"], self.payload["reason"], "rss", "original-1",
+                                      self.payload["raw_sha256"], 100))
+        self.assertEqual(rows[0][6], self.payload)
+
+    def test_conflicting_verdict_or_original_hash_cannot_replace_first_event(self):
+        self.insert(self.payload)
+        changed_verdict = copy.deepcopy(self.payload)
+        changed_verdict.update({"verdict": False, "outcome": "reject", "output_topic": None, "output": None})
+        changed_hash = {**self.payload, "raw_sha256": "a" * 64}
+        changed_reason = {**self.payload, "reason": "Different recorded reasoning"}
+        for conflicting in (changed_verdict, changed_hash, changed_reason):
+            with self.subTest(change=conflicting), self.assertRaisesRegex(ValueError, "Conflicting routing audit"):
+                self.insert(conflicting)
+            self.conn.rollback()
+        with self.conn.cursor() as cursor:
+            cursor.execute("SELECT payload FROM routing_events")
+            self.assertEqual(cursor.fetchall(), [(self.payload,)])
+
+    def test_invalid_event_identity_and_fabricated_reason_status_are_rejected(self):
+        for invalid in ({**self.payload, "event_id": "0" * 64},
+                        {**self.payload, "reason": None, "reason_status": "recorded"}):
+            with self.assertRaises(ValueError):
+                self.insert(invalid)
+            self.conn.rollback()
+        with self.conn.cursor() as cursor:
+            cursor.execute("SELECT count(*) FROM routing_events")
+            self.assertEqual(cursor.fetchone()[0], 0)
+
+    def test_reused_audit_offset_with_another_input_is_not_silently_dropped(self):
+        self.insert(self.payload)
+        self.input.offset.return_value = 43
+        second = routing_event(self.input, {"source": "rss", "source_id": "other", "raw": {"text": "Other"}},
+                               stage="fast", verdict=False, classifier={"reason": None},
+                               started_at="2026-10-19T05:00:00Z", completed_at="2026-10-19T05:00:01Z")
+        with self.assertRaisesRegex(ValueError, "Conflicting routing audit"):
+            self.insert(second)
+        self.conn.rollback()
+        with self.conn.cursor() as cursor:
+            cursor.execute("SELECT event_id FROM routing_events")
+            self.assertEqual(cursor.fetchall(), [(self.payload["event_id"],)])
 
 
 if __name__ == "__main__":
