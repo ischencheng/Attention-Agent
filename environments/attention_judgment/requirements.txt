@@ -1,0 +1,3 @@
+# Tested on Python 3.12; Codex CLI is pinned in agent/Dockerfile.
+jsonschema==4.26.0
+exchange-calendars==4.13.2

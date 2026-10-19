@@ -6,7 +6,7 @@ import json
 import logging
 import signal
 import time
-from typing import Any
+from typing import Any, Callable
 
 import psycopg2
 from confluent_kafka import Consumer, KafkaError, KafkaException, Message
@@ -260,6 +260,57 @@ def commit_with_retry(
     return False
 
 
+def persist_with_retry(
+    conn: Any,
+    msg: Message,
+    payload: dict[str, Any],
+    is_running: Callable[[], bool],
+) -> bool:
+    """Finish this record before the consumer may poll or commit later offsets.
+
+    A statement error can be transient (locks, schema deployment) or a poison
+    record. Both must keep the current offset pending. A broken connection is
+    raised to the supervisor to reconnect and replay from committed offsets.
+    Replays are safe because inserts are unique on Kafka topic/partition/offset.
+    """
+    topic = msg.topic()
+    backoff = 0.5
+    while is_running():
+        try:
+            with DB_WRITE_LATENCY_SECONDS.labels(topic=topic).time():
+                with conn.cursor() as cursor:
+                    inserted = route_and_insert(cursor, msg, payload)
+                conn.commit()
+            if inserted:
+                DB_WRITES_TOTAL.labels(topic=topic, status="success").inc()
+                LAST_SUCCESSFUL_WRITE_UNIXTIME.set(time.time())
+                MESSAGES_TOTAL.labels(topic=topic, status="processed").inc()
+            else:
+                LOGGER.warning("skip unsupported topic topic=%s", topic)
+                MESSAGES_TOTAL.labels(topic=topic, status="unsupported_topic").inc()
+            return True
+        except Exception as exc:
+            DB_WRITES_TOTAL.labels(topic=topic, status="error").inc()
+            MESSAGES_TOTAL.labels(topic=topic, status="db_error").inc()
+            LOGGER.error(
+                "db write failed; holding offset topic=%s partition=%s offset=%s error=%s",
+                topic, msg.partition(), msg.offset(), exc,
+            )
+            # Do not mask a disconnected session by continuing to later records.
+            # Exiting lets Compose restart with a fresh connection and replay.
+            if conn.closed or isinstance(exc, (psycopg2.OperationalError, psycopg2.InterfaceError)):
+                raise
+            conn.rollback()
+            # Small interruptible waits keep shutdown responsive even for poison
+            # records. A poison record deliberately blocks progress, not silently
+            # disappearing behind a later successful offset commit.
+            deadline = time.monotonic() + backoff
+            while is_running() and time.monotonic() < deadline:
+                time.sleep(min(0.1, max(0, deadline - time.monotonic())))
+            backoff = min(backoff * 2, 5.0)
+    return False
+
+
 def run() -> None:
     args = parse_args()
     logging.basicConfig(
@@ -330,40 +381,15 @@ def run() -> None:
                 commit_with_retry(consumer, msg)
                 continue
 
-            try:
-                with DB_WRITE_LATENCY_SECONDS.labels(topic=topic).time():
-                    with conn.cursor() as cursor:
-                        inserted = route_and_insert(cursor, msg, payload)
-                        if not inserted:
-                            LOGGER.warning("skip unsupported topic topic=%s", topic)
-                            MESSAGES_TOTAL.labels(topic=topic, status="unsupported_topic").inc()
-                            conn.commit()
-                            commit_with_retry(consumer, msg)
-                            continue
-                    conn.commit()
-                DB_WRITES_TOTAL.labels(topic=topic, status="success").inc()
-                LAST_SUCCESSFUL_WRITE_UNIXTIME.set(time.time())
-                MESSAGES_TOTAL.labels(topic=topic, status="processed").inc()
-                committed = commit_with_retry(consumer, msg)
-                if not committed:
-                    LOGGER.error(
-                        "give up committing offset topic=%s partition=%s offset=%s",
-                        topic,
-                        msg.partition(),
-                        msg.offset(),
-                    )
-            except Exception as exc:
-                conn.rollback()
-                DB_WRITES_TOTAL.labels(topic=topic, status="error").inc()
-                MESSAGES_TOTAL.labels(topic=topic, status="db_error").inc()
-                LOGGER.error(
-                    "db write failed topic=%s partition=%s offset=%s error=%s",
-                    topic,
-                    msg.partition(),
-                    msg.offset(),
-                    exc,
+            if not persist_with_retry(conn, msg, payload, lambda: running):
+                break
+            committed = commit_with_retry(consumer, msg)
+            if not committed:
+                # A long DB outage can revoke our consumer-group assignment.
+                # Restart instead of consuming with an expired assignment.
+                raise RuntimeError(
+                    f"Cannot commit persisted offset {topic}/{msg.partition()}/{msg.offset()}"
                 )
-                time.sleep(1.0)
     finally:
         consumer.close()
         conn.close()

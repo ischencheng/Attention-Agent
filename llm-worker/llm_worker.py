@@ -12,6 +12,7 @@ from typing import Any
 import requests
 from confluent_kafka import Consumer, KafkaError, KafkaException, Producer
 from prometheus_client import Counter, start_http_server
+from worker_runtime import classify_with_codex, consumer_config, producer_config, produce_confirmed, retry_record
 
 
 LOGGER = logging.getLogger("fast-agent")
@@ -30,10 +31,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--poll-timeout-seconds", type=float, default=1.0)
     parser.add_argument("--attention-threshold", type=float, default=0.55)
     parser.add_argument("--log-level", default="INFO")
-    parser.add_argument("--llm-provider", choices=("gemini", "local"), default="gemini")
+    parser.add_argument("--llm-provider", choices=("gemini", "local", "codex"), default="gemini")
     parser.add_argument("--llm-model", default="gemini-2.5-flash-lite")
     parser.add_argument("--llm-api-key", default=os.getenv("GEMINI_API_KEY", ""))
-    parser.add_argument("--llm-timeout-seconds", type=float, default=12.0)
+    parser.add_argument("--llm-timeout-seconds", type=float, default=float(os.getenv("LLM_TIMEOUT_SECONDS", "180")))
     return parser.parse_args()
 
 
@@ -68,7 +69,7 @@ def build_message_text(payload: dict[str, Any]) -> str:
     if ct == "social_post":
         return (data.get("text") or "").strip()
     if ct == "news_article":
-        return f"{data.get('title', '')} {data.get('snippet', '')}".strip()
+        return f"{data.get('title', '')} {data.get('text') or data.get('snippet', '')}".strip()
     if ct == "price_tick":
         return ""
     return json.dumps(data, ensure_ascii=False)[:2000]
@@ -127,25 +128,41 @@ def get_gemini_yes_no(payload: dict[str, Any], model: str, api_key: str, timeout
     return parse_yes_no(output_text)
 
 
+def process_record(msg: Any, payload: dict[str, Any], args: argparse.Namespace,
+                   producer: Producer, consumer: Consumer) -> None:
+    source_id = extract_source_id(payload)
+    if not source_id or payload.get("content_type") == "price_tick":
+        consumer.commit(message=msg, asynchronous=False)
+        return
+    model_used = "local_heuristic"
+    classification_metadata = {}
+    if args.llm_provider == "codex":
+        is_yes, model_used, classification_metadata = classify_with_codex(payload, "fast", build_message_text(payload), args.llm_timeout_seconds)
+    elif args.llm_provider == "gemini":
+        is_yes = get_gemini_yes_no(payload, args.llm_model, args.llm_api_key, args.llm_timeout_seconds)
+        model_used = args.llm_model
+        if is_yes is None:
+            raise ValueError("Gemini classification unavailable or invalid; no heuristic fallback")
+    else:
+        is_yes = local_score(payload) >= args.attention_threshold
+    if is_yes:
+        output = dict(payload)
+        output["verdict"] = "yes"
+        output["fast_agent"] = {"provider": args.llm_provider, "model": model_used, **classification_metadata}
+        produce_confirmed(producer, topic=args.output_topic, key=source_id.encode("utf-8"),
+                          value=json.dumps(output, ensure_ascii=False).encode("utf-8"), headers=msg.headers())
+    consumer.commit(message=msg, asynchronous=False)
+    FAST_AGENT_OUTPUT_TOTAL.labels("success" if is_yes else "filtered").inc()
+
+
 def main() -> None:
     args = parse_args()
-    logging.basicConfig(
-        level=getattr(logging, args.log_level.upper(), logging.INFO),
-        format="%(asctime)s %(levelname)s %(name)s %(message)s",
-    )
+    logging.basicConfig(level=getattr(logging, args.log_level.upper(), logging.INFO),
+                        format="%(asctime)s %(levelname)s %(name)s %(message)s")
     start_http_server(args.metrics_port)
-    consumer = Consumer(
-        {
-            "bootstrap.servers": args.bootstrap,
-            "group.id": args.group_id,
-            "auto.offset.reset": "earliest",
-            "enable.auto.commit": False,
-            "allow.auto.create.topics": False,
-        }
-    )
-    producer = Producer({"bootstrap.servers": args.bootstrap})
+    consumer = Consumer(consumer_config(args.bootstrap, args.group_id))
+    producer = Producer(producer_config(args.bootstrap))
     consumer.subscribe([args.input_topic])
-
     running = True
 
     def handle_signal(*_: Any) -> None:
@@ -154,79 +171,26 @@ def main() -> None:
 
     signal.signal(signal.SIGINT, handle_signal)
     signal.signal(signal.SIGTERM, handle_signal)
-    LOGGER.info(
-        "fast-agent started input=%s output=%s llm_provider=%s llm_model=%s llm_timeout_seconds=%.1f",
-        args.input_topic,
-        args.output_topic,
-        args.llm_provider,
-        args.llm_model,
-        args.llm_timeout_seconds,
-    )
-    unknown_topic_code = getattr(KafkaError, "UNKNOWN_TOPIC_OR_PART", 3)
-
+    LOGGER.info("fast-agent started input=%s output=%s provider=%s", args.input_topic, args.output_topic, args.llm_provider)
     try:
         while running:
             msg = consumer.poll(args.poll_timeout_seconds)
             if msg is None:
                 continue
             if msg.error():
-                error = msg.error()
-                code = error.code()
-                if code == unknown_topic_code:
-                    LOGGER.warning("fast-agent topic not ready yet: %s", error)
-                    time.sleep(2.0)
+                if msg.error().code() == getattr(KafkaError, "UNKNOWN_TOPIC_OR_PART", 3):
+                    time.sleep(2)
                     continue
                 raise KafkaException(msg.error())
             FAST_AGENT_INPUT_TOTAL.inc()
             payload = decode_payload(msg.value())
             if payload is None:
                 FAST_AGENT_OUTPUT_TOTAL.labels("invalid_payload").inc()
-                consumer.commit(message=msg, asynchronous=False)
-                continue
-
-            source_id = extract_source_id(payload)
-            if not source_id:
-                FAST_AGENT_OUTPUT_TOTAL.labels("invalid_payload").inc()
-                consumer.commit(message=msg, asynchronous=False)
-                continue
-
-            # Skip price ticks — they don't need attention scoring
-            if payload.get("content_type") == "price_tick":
-                consumer.commit(message=msg, asynchronous=False)
-                continue
-
-            is_yes: bool | None = None
-            if args.llm_provider == "gemini":
-                try:
-                    is_yes = get_gemini_yes_no(
-                        payload=payload,
-                        model=args.llm_model,
-                        api_key=args.llm_api_key,
-                        timeout_seconds=args.llm_timeout_seconds,
-                    )
-                except Exception as exc:
-                    LOGGER.warning("gemini classify failed, fallback local score: %s", exc)
-
-            if is_yes is None:
-                is_yes = local_score(payload) >= args.attention_threshold
-
-            if not is_yes:
-                FAST_AGENT_OUTPUT_TOTAL.labels("filtered").inc()
-                consumer.commit(message=msg, asynchronous=False)
-                continue
-
-            # Produce unified envelope with verdict enrichment
-            output = dict(payload)
-            output["verdict"] = "yes"
-            producer.produce(
-                topic=args.output_topic,
-                key=source_id.encode("utf-8"),
-                value=json.dumps(output, ensure_ascii=False).encode("utf-8"),
-                headers=msg.headers(),
-            )
-            producer.poll(0)
-            FAST_AGENT_OUTPUT_TOTAL.labels("success").inc()
-            consumer.commit(message=msg, asynchronous=False)
+                operation = lambda: consumer.commit(message=msg, asynchronous=False)
+            else:
+                operation = lambda: process_record(msg, payload, args, producer, consumer)
+            if not retry_record(operation, lambda: running):
+                break
     finally:
         producer.flush(10)
         consumer.close()

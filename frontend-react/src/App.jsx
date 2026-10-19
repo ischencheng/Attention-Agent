@@ -116,7 +116,7 @@ function AnnotationCard({ row }) {
       {facts.length > 0 && (
         <ul className="facts-list">
           {facts.map((f, i) => (
-            <li key={i} className="muted"><SourceBadge source={f.source || "?"} /> {f.fact}</li>
+            <li key={i} className="muted"><SourceBadge source={f.source || "?"} /> {typeof f === "string" ? f : (f.fact || f.observation || f.statement || f.text || JSON.stringify(f))}</li>
           ))}
         </ul>
       )}
@@ -218,6 +218,7 @@ function FeedItem({ item }) {
 export default function App() {
   const [feed, setFeed] = useState([]);
   const [overview, setOverview] = useState({});
+  const [dataState, setDataState] = useState("loading");
   const [wsState, setWsState] = useState("connecting");
   const wsUrl = useMemo(() => buildWsUrl(), []);
 
@@ -227,11 +228,13 @@ export default function App() {
         fetch(buildApiUrl("/api/feed?limit=50")),
         fetch(buildApiUrl("/api/overview")),
       ]);
+      if (!feedRes.ok || !overviewRes.ok) throw new Error("Pipeline API unavailable");
       const feedData = await feedRes.json();
       const overviewData = await overviewRes.json();
       setFeed(Array.isArray(feedData.items) ? feedData.items : []);
       setOverview(overviewData || {});
-    } catch { /* ignore */ }
+      setDataState("ready");
+    } catch { setDataState("error"); }
   }
 
   useEffect(() => { loadData(); }, []);
@@ -258,6 +261,9 @@ export default function App() {
 
   const sources = overview.sources || {};
   const sourceEntries = Object.entries(sources);
+  const agents = Array.isArray(overview.agents) ? overview.agents : [];
+  const stages = [["raw", "raw_count"], ["clean deliveries", "clean_count"], ["embedded", "embedding_count"],
+    ["tickets", "ticket_count"], ["annotations", "annotation_count"], ["decisions", "decision_count"]];
 
   return (
     <main className="container">
@@ -284,16 +290,29 @@ export default function App() {
         </article>
         <article className="card">
           <h3>Pipeline</h3>
-          <p style={{ margin: "2px 0" }}>
-            <span className="muted">tickets</span> {(overview.ticket_count || 0).toLocaleString()}
-          </p>
-          <p style={{ margin: "2px 0" }}>
-            <span className="muted">annotations</span> {(overview.annotation_count || 0).toLocaleString()}
-          </p>
-          <p style={{ margin: "2px 0" }}>
-            <span className="muted">decisions</span> {(overview.decision_count || 0).toLocaleString()}
-          </p>
+          {stages.map(([label, key]) => (
+            <p key={key} style={{ margin: "2px 0" }}>
+              <span className="muted">{label}</span> {overview[key] == null ? "-" : overview[key].toLocaleString()}
+            </p>
+          ))}
+          {dataState === "error" && <p className="muted">API unavailable. Showing the last received snapshot.</p>}
         </article>
+      </section>
+
+      <section className="cards" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))" }}>
+        {["mid", "strong"].map((role) => {
+          const agent = agents.find((item) => item.role === role);
+          return (
+            <article className="card" key={role}>
+              <h3>{role === "mid" ? "Mid · evidence accumulation" : "Strong · continuing judgments"}</h3>
+              {agent ? <>
+                <p className="muted">Last state saved: {fmtTime(agent.updated_at)}</p>
+                <p>{agent.pending_theme_count.toLocaleString()} pending themes · {agent.thesis_count.toLocaleString()} theses</p>
+                <p className="muted">State key: {agent.agent_id}</p>
+              </> : <p className="muted">{dataState === "loading" ? "Loading saved state…" : "No saved state received yet."}</p>}
+            </article>
+          );
+        })}
       </section>
 
       <section className="feed-section">
@@ -302,7 +321,12 @@ export default function App() {
           {feed.map((item) => (
             <FeedItem key={`${item.item_type}-${item.id}`} item={item} />
           ))}
-          {feed.length === 0 && <p className="muted">No activity yet. Pipeline is running...</p>}
+          {feed.length === 0 && <p className="muted">{
+            dataState === "loading" ? "Loading published activity…" :
+            dataState === "error" ? "Published activity is unavailable while the API cannot be reached." :
+            overview.annotation_count === 0 ? "Waiting for evidence to meet publication criteria." :
+            "No published activity in this view."
+          }</p>}
         </div>
       </section>
     </main>

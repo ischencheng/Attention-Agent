@@ -1,0 +1,4 @@
+-r ../skills/requirements.txt
+-r ../environments/attention_judgment/requirements.txt
+sentence-transformers==5.1.1
+python-dotenv==1.2.1

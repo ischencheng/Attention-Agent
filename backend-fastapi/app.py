@@ -4,10 +4,12 @@ import asyncio
 import contextlib
 import logging
 import os
+import sys
 import time
 from collections.abc import Iterable
 from decimal import Decimal
 from typing import Any
+from pathlib import Path
 
 import psycopg2
 from fastapi import Body, FastAPI, Query, WebSocket, WebSocketDisconnect
@@ -15,6 +17,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
 from psycopg2.extras import RealDictCursor
 from starlette.responses import Response
+
+# The image includes /app/evidence.py; local checkouts use skills/.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.append(str(Path(__file__).resolve().parent.parent / "skills"))
+from evidence import verify_evidence
 
 
 LOGGER = logging.getLogger("backend-fastapi")
@@ -125,6 +132,29 @@ def query_overview() -> dict[str, Any]:
                 """)
                 sources = {r["source"]: int(r["cnt"]) for r in cur.fetchall()}
                 row["sources"] = sources
+                # Summarize persistent working memory in the database. Do not
+                # expose full agent state, source documents or thesis snapshots.
+                cur.execute("""
+                    SELECT agent_id, updated_at,
+                        CASE jsonb_typeof(state->'pending_themes')
+                            WHEN 'array' THEN jsonb_array_length(state->'pending_themes')
+                            WHEN 'object' THEN (SELECT COUNT(*) FROM jsonb_object_keys(state->'pending_themes'))
+                            ELSE 0
+                        END AS pending_theme_count,
+                        CASE jsonb_typeof(state->'theses')
+                            WHEN 'array' THEN jsonb_array_length(state->'theses')
+                            WHEN 'object' THEN (SELECT COUNT(*) FROM jsonb_object_keys(state->'theses'))
+                            ELSE 0
+                        END AS thesis_count
+                    FROM agent_state ORDER BY updated_at DESC, agent_id
+                """)
+                agents = normalize_rows(cur.fetchall())
+                mid_ids = {"claude-mid", "codex-mid", os.getenv("MID_AGENT_ID", "claude-mid")}
+                strong_ids = {"claude-strong", "codex-strong", os.getenv("STRONG_AGENT_ID", "claude-strong")}
+                for agent in agents:
+                    agent["role"] = ("mid" if agent["agent_id"] in mid_ids else
+                                     "strong" if agent["agent_id"] in strong_ids else None)
+                row["agents"] = agents
                 return normalize_value(row)
 
 
@@ -249,6 +279,22 @@ def query_tickets_by_ids(ids: list[int]) -> list[dict[str, Any]]:
                 return normalize_rows(cur.fetchall())
 
 
+def query_decision_evidence(decision_id: int) -> dict[str, Any] | None:
+    with DB_QUERY_LATENCY.labels("decision_evidence").time():
+        conn = get_conn()
+        try:
+            conn.set_session(isolation_level="REPEATABLE READ", readonly=True)
+            with conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT payload FROM decision_packets WHERE id = %s", (decision_id,))
+                    row = cur.fetchone()
+                if row is None:
+                    return None
+                return verify_evidence(conn, decision_id, row[0])
+        finally:
+            conn.close()
+
+
 # ---------------------------------------------------------------------------
 # WebSocket broadcast loop
 # ---------------------------------------------------------------------------
@@ -350,6 +396,16 @@ async def api_annotations(limit: int = Query(default=50, ge=1, le=500)) -> dict[
     API_REQUESTS.labels("/api/annotations").inc()
     rows = await db_call(query_annotations, limit)
     return {"items": rows, "count": len(rows)}
+
+
+@app.get("/api/decisions/{decision_id}/evidence")
+async def api_decision_evidence(decision_id: int) -> Any:
+    API_REQUESTS.labels("/api/decisions/{id}/evidence").inc()
+    result = await db_call(query_decision_evidence, decision_id)
+    if result is None:
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=404, content={"detail": "not found"})
+    return result
 
 
 @app.get("/api/tickets/by-ids")

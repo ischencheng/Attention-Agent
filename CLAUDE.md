@@ -1,10 +1,10 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Development guidance for this repository. Runtime Mid/Strong instructions are in `agent/AGENTS.md`.
 
 ## Overview
 
-AI Attention Proxy — a multi-source information consumption pipeline built on a 3-node KRaft Kafka cluster. It ingests real-time data from Bluesky, Twitter, Finnhub (stock prices), and Polygon.io (financial news), runs them through a multi-stage LLM processing chain, and surfaces investment-relevant signals in a React frontend. Mid/strong agent work is delegated to external agents (Claude Code, Codex, etc.) via CLI skills.
+AI Attention Proxy — a multi-source information consumption pipeline built on a 3-node KRaft Kafka cluster. It ingests real-time data from Bluesky, Twitter, Finnhub (stock prices), and Polygon.io (financial news), runs them through a multi-stage LLM processing chain, and surfaces investment-relevant signals in a React frontend. Mid/strong agent work is delegated to Codex CLI agents via Python skills.
 
 ## Key Commands
 
@@ -48,6 +48,44 @@ docker compose exec -T postgres psql -U bluesky -d bluesky -c "SELECT * FROM <ta
 ```
 
 Core tables: `raw_messages`, `source_clean`, `vector_embeddings`, `attention_tickets`, `annotations`, `decision_packets`
+
+### Historical Evidence and the Coding Environment
+
+New decisions published through `skills/db_write.py` require valid annotation
+and ticket references. The write skill generates `evidence_snapshot` in one
+consistent database transaction; callers must not supply it. The snapshot
+preserves the annotation at publication and identifies authoritative originals
+by source, source ID, and content digest. Later annotation corrections do not
+change that history.
+
+`GET /api/decisions/{decision_id}/evidence` returns `verified`, `broken`, or
+`legacy_unverified`. Legacy decisions are not retrospectively assigned evidence.
+Verification checks provenance integrity, not investment merit or whether a
+model understood the source material.
+
+Apply the additive migration to an existing database before relying on raw
+immutability (init scripts run automatically only for fresh data volumes):
+
+```bash
+docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U bluesky -d bluesky \
+  < postgres/init/002_evidence.sql
+docker compose up -d --build backend-fastapi
+```
+
+The API image includes `skills/evidence.py` at `/app/evidence.py`. Its Docker
+build context is the repository root; for a standalone build, use
+`docker build -f backend-fastapi/Dockerfile .` from that root.
+The migration blocks ordinary UPDATE/DELETE of raw originals and changes to
+published decision snapshots/references; it does not constrain a DB superuser.
+
+The runnable repository-level coding task is documented in
+[`environments/attention_provenance/README.md`](environments/attention_provenance/README.md),
+with its full behavioral contract in
+[`TASK.md`](environments/attention_provenance/TASK.md).
+Use its exported unsolved baseline for an agent attempt: the current checkout
+contains the reference repair. Its grader uses real PostgreSQL and FastAPI with
+captured Kafka publication, and makes no claim about live broker delivery,
+LLM quality, or trading returns.
 
 ## Service Endpoints
 
@@ -119,14 +157,14 @@ All messages use a unified envelope: `{source, source_id, content_type, timestam
 - **skills/mrbrain_invest.py** — Evaluate investments using MrBrain's 10-layer framework (value investing, risk management, macro cycles, competition theory, psychology). Source: 43 videos from 脑总MrBrain. Reference: `MrBrain-invest-principle/`
 
 **Agent** (`agent/`):
-- **agent/CLAUDE.md** — Workspace instructions for mid/strong agents running inside Docker
-- **agent/Dockerfile** — Container that runs Claude Code as an agent with mounted skills
-- Mid/strong agent services in docker-compose mount `skills/` and `agent/CLAUDE.md`
+- **agent/AGENTS.md** — Workspace instructions for mid/strong agents running inside Docker
+- **agent/Dockerfile** — Container that runs Codex CLI 0.163.0 with mounted Python skills
+- Mid/strong agent services in docker-compose mount `skills/`; `agent/AGENTS.md` and the Codex runner are copied into the image
 - **trigger_agents.sh** — Scheduling & manual trigger script:
   - Loop mode: mid-agent every 30m, strong-agent every 40m (independent timers)
   - Manual: `./trigger_agents.sh mid|strong|both` for one-shot trigger
   - `--mid-interval` / `--strong-interval` flags to override defaults
-- **Watchlist** (`WATCHLIST` env var, default: `NVDA,SNDK,SPY,QQQ`): strong-agent only evaluates tickers in this list
+- **Discovery scope** (`RESEARCH_CONTEXT`): original investment topics; entities emerge from evidence with no fixed portfolio or ticker restriction
 
 ### Infrastructure
 
@@ -145,6 +183,7 @@ Required secrets (set in `.env`):
 | `FINNHUB_API_KEY` | Optional | finnhub-ingestor       |
 | `POLYGON_API_KEY` | Optional | polygon-news-ingestor  |
 | `CARAVO_API_KEY`  | Optional | twitter-ingestor       |
-| `CLAUDE_AUTH_DIR` | Optional | mid-agent, strong-agent (Docker Claude auth) |
+| `CODEX_API_KEY` | Optional | Mid/Strong hosted model auth; alternatively log in through each container CLI |
 | `TWITTER_FOLLOW_USER` | Optional | twitter-ingestor (default: genhcnehcsi) |
-| `WATCHLIST`       | Optional | strong-agent (default: NVDA,SNDK,SPY,QQQ) |
+| `RESEARCH_CONTEXT` | Optional | Original topic interests, not a ticker allowlist |
+| `CODEX_MODEL` / role overrides | Optional | Account-available model selection |

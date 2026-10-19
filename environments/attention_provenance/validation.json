@@ -1,0 +1,166 @@
+{
+  "date": "2026-10-19",
+  "baseline_commit": "ed4d938ff89645fbeb1e58a10d66509425ede379",
+  "candidate_source_sha256": "0da925e3e34c8f8f6d1a204d49d36639c56ca9d825a3dc375a8c26d694dd3e8a",
+  "grader_sha256": "f1376af73a6af45bd12f8086160f649474b8a7e662171492fec030d114ef5928",
+  "runtime": {
+    "python": "3.12.13",
+    "postgres": "PostgreSQL 16.2 on aarch64-apple-darwin23.5.0, compiled by Apple clang version 15.0.0 (clang-1500.0.40.1), 64-bit",
+    "wall_seconds": 9.963
+  },
+  "reference_runs": [
+    {
+      "seed": 1729,
+      "score": 100.0,
+      "passed_groups": [
+        "original_preservation",
+        "identity_replay",
+        "historical_consistency",
+        "atomic_reference_updates",
+        "invalid_evidence",
+        "publish_fail_closed",
+        "api_validation",
+        "immutable_storage",
+        "restart_persistence",
+        "consistent_snapshot"
+      ],
+      "bridge_calls": 108
+    },
+    {
+      "seed": 271828,
+      "score": 100.0,
+      "passed_groups": [
+        "original_preservation",
+        "identity_replay",
+        "historical_consistency",
+        "atomic_reference_updates",
+        "invalid_evidence",
+        "publish_fail_closed",
+        "api_validation",
+        "immutable_storage",
+        "restart_persistence",
+        "consistent_snapshot"
+      ],
+      "bridge_calls": 108
+    }
+  ],
+  "grader_selfcheck": {
+    "checks": [
+      {
+        "name": "reference",
+        "score": 100.0,
+        "success": true,
+        "expected_success": true,
+        "expectation_met": true,
+        "full_suite": true,
+        "failed_groups": []
+      },
+      {
+        "name": "baseline",
+        "score": 0.0,
+        "success": false,
+        "expected_success": false,
+        "expectation_met": true,
+        "full_suite": true,
+        "failed_groups": [
+          "original_preservation",
+          "identity_replay",
+          "historical_consistency",
+          "atomic_reference_updates",
+          "invalid_evidence",
+          "publish_fail_closed",
+          "api_validation",
+          "immutable_storage",
+          "restart_persistence",
+          "consistent_snapshot"
+        ]
+      },
+      {
+        "name": "no_snapshot",
+        "score": 0.0,
+        "success": false,
+        "expected_success": false,
+        "expectation_met": true,
+        "full_suite": false,
+        "failed_groups": [
+          "original_preservation"
+        ]
+      },
+      {
+        "name": "fail_open",
+        "score": 0.0,
+        "success": false,
+        "expected_success": false,
+        "expectation_met": true,
+        "full_suite": false,
+        "failed_groups": [
+          "publish_fail_closed"
+        ]
+      },
+      {
+        "name": "everything_verified",
+        "score": 0.0,
+        "success": false,
+        "expected_success": false,
+        "expectation_met": true,
+        "full_suite": false,
+        "failed_groups": [
+          "api_validation"
+        ]
+      },
+      {
+        "name": "read_committed",
+        "score": 0.0,
+        "success": false,
+        "expected_success": false,
+        "expectation_met": true,
+        "full_suite": false,
+        "failed_groups": [
+          "consistent_snapshot"
+        ]
+      },
+      {
+        "name": "dropped_decision_fields",
+        "score": 0.0,
+        "success": false,
+        "expected_success": false,
+        "expectation_met": true,
+        "full_suite": false,
+        "failed_groups": [
+          "original_preservation"
+        ]
+      },
+      {
+        "name": "non_idempotent_migration",
+        "score": 0.0,
+        "success": false,
+        "expected_success": false,
+        "expectation_met": true,
+        "full_suite": false,
+        "failed_groups": [
+          "immutable_storage"
+        ]
+      }
+    ],
+    "passed": true,
+    "note": "Reference/seeded defect checks, not blinded model attempts or an adversarial sandbox audit."
+  },
+  "scope": {
+    "database": "real PostgreSQL",
+    "api": "FastAPI TestClient, fresh process per request",
+    "kafka": "publication captured, no live broker",
+    "model_attempt": false,
+    "security_sandbox": false
+  },
+  "additional_checks": [
+    "Python compileall passed",
+    "git diff --check passed",
+    "Backend Docker COPY paths resolve from repository root"
+  ],
+  "not_run": [
+    "Docker image build",
+    "Full Kafka/Flink stack",
+    "Blinded model attempts",
+    "RL training"
+  ]
+}

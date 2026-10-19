@@ -1,0 +1,13 @@
+{
+  "provenance": "Original docker-compose.yaml INVESTMENT_KEYWORDS and Flink followed-Twitter exception at ed4d938ff89645fbeb1e58a10d66509425ede379",
+  "keywords": ["ai", "earnings", "guidance", "capex", "datacenter", "storage", "power", "energy", "nuclear", "semiconductor", "gpu", "inference", "llm", "margin", "valuation", "cpi", "fed", "yield"],
+  "followed_twitter_bypasses_keyword_filter": true,
+  "asset_universe": "discovered from evidence, no fixed ticker list or portfolio",
+  "pilot_feeds": [
+    {"name": "Federal Reserve releases", "url": "https://www.federalreserve.gov/feeds/press_all.xml"},
+    {"name": "NVIDIA official blog", "url": "https://blogs.nvidia.com/feed/"},
+    {"name": "AMD investor releases", "url": "https://ir.amd.com/rss/news-releases.xml"},
+    {"name": "OpenAI news", "url": "https://openai.com/news/rss.xml"}
+  ],
+  "pilot_coverage": "A bounded public-primary-feed pilot for hosts without the Kafka stack. It is not the original Twitter/Bluesky/Finnhub/Polygon feed and does not exhaust the topic space. Feed publishers are sources, not required portfolio holdings."
+}

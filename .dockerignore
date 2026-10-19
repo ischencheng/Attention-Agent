@@ -1,6 +1,15 @@
 .git
 .gitignore
 .venv
+.env
+.env.*
+!.env.example
+.agents/
+.claude/
+postgres/data/
+environments/attention_provenance/runs/
+environments/attention_judgment/runs/
+runs/
 __pycache__/
 *.pyc
 *.pyo

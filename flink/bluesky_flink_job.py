@@ -8,9 +8,13 @@ import os
 from typing import Any, Dict, Optional
 from collections.abc import Iterable
 
+from confluent_kafka import KafkaError, KafkaException
+from confluent_kafka.admin import AdminClient, NewTopic
 from pyflink.common import SimpleStringSchema, Types, WatermarkStrategy
 from pyflink.datastream import StreamExecutionEnvironment
+from pyflink.datastream.connectors import DeliveryGuarantee
 from pyflink.datastream.connectors.kafka import (
+    KafkaOffsetResetStrategy,
     KafkaOffsetsInitializer,
     KafkaRecordSerializationSchema,
     KafkaSink,
@@ -39,7 +43,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--raw-topic", default="source_raw")
     parser.add_argument("--clean-topic", default="source_clean")
     parser.add_argument("--group-id", default="flink-source-normalizer-v1")
-    parser.add_argument("--startup-mode", choices=("earliest", "latest"), default="earliest")
+    parser.add_argument("--startup-mode", choices=("committed", "earliest", "latest"), default="committed")
+    parser.add_argument("--checkpoint-interval-ms", type=int, default=30000)
     parser.add_argument("--parallelism", type=int, default=1)
     parser.add_argument("--self-test", action="store_true", help="Run single-file parser self test and exit.")
     parser.add_argument("--log-level", default="INFO")
@@ -103,19 +108,49 @@ def flink_map_fn(raw_message: str) -> Iterable[str]:
     return [json.dumps(output, ensure_ascii=False)]
 
 
+def ensure_topics(bootstrap: str, topics: list[str]) -> None:
+    """Provision stream endpoints before KafkaSource enumerates partitions.
+
+    Fresh clusters otherwise enter a restart loop until an ingestor happens to
+    create source_raw. Match the ingestors' six-partition, three-replica policy.
+    Concurrent ingestor creation is harmless; other errors reach the supervisor.
+    """
+    admin = AdminClient({"bootstrap.servers": bootstrap})
+    futures = admin.create_topics(
+        [NewTopic(topic, num_partitions=6, replication_factor=3) for topic in dict.fromkeys(topics)],
+        request_timeout=20,
+    )
+    for topic, future in futures.items():
+        try:
+            future.result()
+            LOGGER.info("created Kafka topic %s", topic)
+        except KafkaException as exc:
+            if exc.args[0].code() != KafkaError.TOPIC_ALREADY_EXISTS:
+                raise
+
+
 def run_flink_job(args: argparse.Namespace) -> None:
     logging.basicConfig(
         level=getattr(logging, args.log_level.upper(), logging.INFO),
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
+    ensure_topics(args.bootstrap, [args.raw_topic, args.clean_topic])
     env = StreamExecutionEnvironment.get_execution_environment()
     env.set_parallelism(max(1, args.parallelism))
+    if args.checkpoint_interval_ms <= 0:
+        raise ValueError("checkpoint-interval-ms must be positive")
+    env.enable_checkpointing(args.checkpoint_interval_ms)
 
-    startup = (
-        KafkaOffsetsInitializer.earliest()
-        if args.startup_mode == "earliest"
-        else KafkaOffsetsInitializer.latest()
-    )
+    # Checkpoints commit source offsets only after the at-least-once sink has
+    # flushed. A new job resumes those offsets; explicit earliest/latest remain
+    # available for deliberate replays. The final partial checkpoint may replay,
+    # so downstream consumers still deduplicate source identities.
+    if args.startup_mode == "committed":
+        startup = KafkaOffsetsInitializer.committed_offsets(KafkaOffsetResetStrategy.EARLIEST)
+    elif args.startup_mode == "earliest":
+        startup = KafkaOffsetsInitializer.earliest()
+    else:
+        startup = KafkaOffsetsInitializer.latest()
     source = (
         KafkaSource.builder()
         .set_bootstrap_servers(args.bootstrap)
@@ -134,6 +169,7 @@ def run_flink_job(args: argparse.Namespace) -> None:
     clean_sink = (
         KafkaSink.builder()
         .set_bootstrap_servers(args.bootstrap)
+        .set_delivery_guarantee(DeliveryGuarantee.AT_LEAST_ONCE)
         .set_record_serializer(
             KafkaRecordSerializationSchema.builder()
             .set_topic(args.clean_topic)

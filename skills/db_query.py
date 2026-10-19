@@ -38,12 +38,14 @@ DB_CONFIG = {
 def run_query(params: dict) -> list[dict]:
     conn = psycopg2.connect(**DB_CONFIG)
     try:
+        conn.set_session(readonly=True)
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            # Raw SQL mode (read-only safety: reject writes)
+            # PostgreSQL enforces read-only transactions; a substring blacklist
+            # incorrectly rejected ordinary columns such as created_at.
             if "sql" in params:
                 sql = params["sql"].strip()
                 sql_upper = sql.upper()
-                if any(kw in sql_upper for kw in ["INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "TRUNCATE", "CREATE"]):
+                if not sql_upper.startswith(("SELECT ", "SELECT\n", "WITH ", "WITH\n")):
                     return [{"error": "Only SELECT queries are allowed"}]
                 cur.execute(sql)
                 rows = cur.fetchall()
