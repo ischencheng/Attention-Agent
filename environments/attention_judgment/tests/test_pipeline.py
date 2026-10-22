@@ -349,6 +349,31 @@ class ResearchStateTests(unittest.TestCase):
         self.assertEqual(second["frozen_at"], NOW)
         self.assertEqual(len(self.ledger.entries(pipeline.RESEARCH_KIND)), 1)
 
+    def test_report_counts_pending_records_without_changing_archived_shapes(self):
+        recovered = {f"batch-{i}": [{"theme_id": f"current-{i}"}] for i in range(4)}
+        recovered["recovered"] = [{"theme_id": f"prior-{i}"} for i in range(480)]
+        cases = [
+            ([{"theme_id": "a"}, {"theme_id": "b"}], 2),
+            ({"a": {"claim": "first"}, "b": {"claim": "second"}}, 2),
+            ({"batch-a": [{"theme_id": "a"}, {"theme_id": "b"}],
+              "batch-b": [{"theme_id": "c"}], "empty-batch": []}, 3),
+            (recovered, 484),
+            ({"a": {"claim": "first"}, "batch-b": [{"theme_id": "b"}, {"theme_id": "c"}]}, 3),
+            ({}, 0),
+            ([], 0),
+            (None, 0),
+        ]
+        for themes, expected in cases:
+            with self.subTest(expected=expected, shape=type(themes).__name__):
+                self.row["state"]["pending_themes"] = themes
+                self.freeze()
+                entry = self.ledger.entries(pipeline.RESEARCH_KIND)[-1]
+                self.assertEqual(entry["payload"]["state"]["pending_themes"], themes)
+                summary = pipeline.report(self.ledger)["latest_research_states"][0]
+                self.assertEqual(summary["pending_theme_count"], expected)
+                self.assertEqual(summary["thesis_count"], 1)
+                self.assertNotIn("state", summary)
+
     def test_mutation_and_reversion_append_versions_without_erasing_prior_reasoning(self):
         original = copy.deepcopy(self.row["state"])
         first = self.freeze()

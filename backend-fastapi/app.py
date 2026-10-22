@@ -140,7 +140,13 @@ def query_overview() -> dict[str, Any]:
                     SELECT agent_id, updated_at,
                         CASE jsonb_typeof(state->'pending_themes')
                             WHEN 'array' THEN jsonb_array_length(state->'pending_themes')
-                            WHEN 'object' THEN (SELECT COUNT(*) FROM jsonb_object_keys(state->'pending_themes'))
+                            WHEN 'object' THEN (
+                                SELECT COALESCE(SUM(CASE jsonb_typeof(value)
+                                    WHEN 'array' THEN jsonb_array_length(value)
+                                    ELSE 1
+                                END), 0)
+                                FROM jsonb_each(state->'pending_themes')
+                            )
                             ELSE 0
                         END AS pending_theme_count,
                         CASE jsonb_typeof(state->'theses')
