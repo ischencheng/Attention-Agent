@@ -121,6 +121,21 @@ Keep rejected or invalidated views and their original evidence; do not silently
 rewrite a past prediction to match a later outcome. Track pending questions and
 when they should be revisited. Preserve unrelated state fields when updating.
 
+The state helper rejects changes between list and object representations of
+`pending_themes` or `theses`, removal of existing collection identities, and
+loss of cumulative `handled_ticket_ids`. Lists use stable `theme_id` or
+`thesis_id` fields; objects retain their keys, including legacy batch groups.
+Keep historical themes and mark their status instead of deleting them. You may
+compact a record's redundant fields while retaining its identity and evidence.
+`set` requires complete state; `merge` preserves omitted fields, but supplied
+lists replace the whole list and must include the retained identities and
+handled IDs. `reviewed_ticket_ids` may describe only the current batch.
+Rejected saves exit nonzero and leave stored state unchanged: read the latest
+state and correct the update before reporting success. Saves are serialized per
+agent and merges read the latest locked state. This does not detect stale
+full-state edits to existing record contents; reread state before preparing a
+complete `set` update.
+
 ```bash
 python /app/skills/agent_state.py '{"agent_id":"<state-key>","action":"set","state":{<complete updated state>}}'
 ```
