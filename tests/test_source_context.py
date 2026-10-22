@@ -71,6 +71,49 @@ class HTTPProjectionTests(unittest.TestCase):
         self.assertEqual(response["records"][0]["sha256"], original_hash)
         self.assertTrue(any("redacted or bounded" in warning for warning in response["warnings"]))
 
+    def test_overview_counts_theme_records_inside_groups(self):
+        recovered = {f"batch-{i}": [{"theme_id": f"current-{i}"}] for i in range(4)}
+        recovered["recovered"] = [{"theme_id": f"prior-{i}"} for i in range(480)]
+        cases = {
+            "flat-list": ([{"theme_id": "a"}, {"theme_id": "b"}], 2),
+            "direct-records": ({"a": {"claim": "first"}, "b": {"claim": "second"}}, 2),
+            "grouped-lists": ({"batch-a": [{"theme_id": "a"}, {"theme_id": "b"}],
+                               "batch-b": [{"theme_id": "c"}], "empty-batch": []}, 3),
+            "recovered-five-groups": (recovered, 484),
+            "mixed-records-and-groups": ({"a": {"claim": "first"},
+                                          "batch-b": [{"theme_id": "b"}, {"theme_id": "c"}]}, 3),
+            "empty-object": ({}, 0),
+            "empty-list": ([], 0),
+            "null": (None, 0),
+        }
+        with tempfile.TemporaryDirectory(prefix="attention-overview-") as folder:
+            server = pgserver.get_server(Path(folder) / "postgres", cleanup_mode="stop")
+            try:
+                settings = parse_dsn(server.get_uri())
+                def connect():
+                    return psycopg2.connect(**settings)
+                with connect() as conn, conn.cursor() as cursor:
+                    cursor.execute("CREATE TABLE raw_messages (payload JSONB)")
+                    for table in ("source_clean", "attention_tickets", "annotations",
+                                  "decision_packets", "vector_embeddings"):
+                        cursor.execute(f"CREATE TABLE {table} (id INTEGER)")
+                    cursor.execute("""CREATE TABLE agent_state (
+                        agent_id TEXT, state JSONB, updated_at TIMESTAMPTZ DEFAULT NOW())""")
+                    for agent_id, (themes, _) in cases.items():
+                        cursor.execute("INSERT INTO agent_state (agent_id, state) VALUES (%s, %s)",
+                                       (agent_id, Json({"pending_themes": themes,
+                                                        "theses": {"existing": {"claim": "unchanged"}}})))
+                with patch.object(self.api, "get_conn", side_effect=connect):
+                    overview = self.api.query_overview()
+                agents = {agent["agent_id"]: agent for agent in overview["agents"]}
+                for agent_id, (_, expected) in cases.items():
+                    with self.subTest(shape=agent_id):
+                        self.assertEqual(agents[agent_id]["pending_theme_count"], expected)
+                        self.assertEqual(agents[agent_id]["thesis_count"], 1)
+                        self.assertNotIn("state", agents[agent_id])
+            finally:
+                server.cleanup()
+
 
 class SourceContextPostgresTests(unittest.TestCase):
     @classmethod

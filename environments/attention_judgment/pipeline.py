@@ -225,6 +225,8 @@ def research_summary(frozen):
     state = frozen["state"]
     def count(name):
         value = state.get(name)
+        if name == "pending_themes" and isinstance(value, dict):
+            return sum(len(item) if isinstance(item, list) else 1 for item in value.values())
         return len(value) if isinstance(value, (dict, list)) else 0
     return {"stable_id": frozen["stable_id"], "agent_id": frozen["agent_id"],
             "version": frozen["version"], "updated_at": frozen["updated_at"],
