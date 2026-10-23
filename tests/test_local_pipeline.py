@@ -20,8 +20,10 @@ spec.loader.exec_module(supervisor)
 
 
 class StateConnection:
-    def __init__(self, saved=True):
+    def __init__(self, saved=True, state=None, updated_at=None):
         self.saved = saved
+        self.state = state if state is not None else {}
+        self.updated_at = updated_at
 
     def __enter__(self):
         return self
@@ -33,10 +35,11 @@ class StateConnection:
         return self
 
     def execute(self, sql, args=()):
-        assert sql.startswith("SELECT updated_at FROM agent_state")
+        assert sql.startswith("SELECT state, updated_at FROM agent_state")
 
     def fetchone(self):
-        return (datetime.now(timezone.utc) + timedelta(seconds=1),) if self.saved else None
+        updated_at = self.updated_at or datetime.now(timezone.utc) + timedelta(seconds=1)
+        return (self.state, updated_at) if self.saved else None
 
 
 def completed(prompt, *_args, **_kwargs):
@@ -57,7 +60,8 @@ class SchedulerTests(unittest.TestCase):
         self.versions = {str(index): f"v{index}" for index in range(1, 46)}
         self.signature_patch = patch.object(supervisor, "signature", side_effect=lambda _role: dict(self.versions))
         self.signature_patch.start()
-        self.connection_patch = patch.object(supervisor, "connect", return_value=StateConnection())
+        self.connection = StateConnection(state={"handled_ticket_ids": list(range(1, 46))})
+        self.connection_patch = patch.object(supervisor, "connect", return_value=self.connection)
         self.connection_patch.start()
         self.run_patch = patch.object(supervisor, "run", side_effect=completed)
         self.run = self.run_patch.start()
@@ -116,10 +120,12 @@ class SchedulerTests(unittest.TestCase):
             result["final"]["reviewed_ticket_ids"] = [1, 2, 3]
             return result
         self.run.side_effect = partial
+        self.connection.state = {"handled_ticket_ids": [99, 1, 2, 3]}
         first = supervisor.cycle("mid")
         self.assertEqual(first["pending_count"], 42)
         self.assertEqual(set(first["processed_versions"]), {"1", "2", "3"})
         self.run.side_effect = completed
+        self.connection.state = {"handled_ticket_ids": [99, *range(1, 24)]}
         second = supervisor.cycle("mid")
         self.assertEqual(second["selected_input_ids"], list(range(4, 24)))
 
@@ -169,6 +175,85 @@ class SchedulerTests(unittest.TestCase):
                 supervisor.cycle("mid")
         self.assertNotIn("processed_versions", self.status())
         self.assertEqual(self.status()["status"], "failed")
+
+    def test_recent_state_save_without_handled_history_cannot_advance(self):
+        self.versions = {"1": "one"}
+        for state in ({}, {"reviewed_ticket_ids": [1]}, {"handled_ticket_ids_this_cycle": [1]},
+                      {"handled_ticket_ids": []}):
+            with self.subTest(state=state):
+                self.connection.state = state
+                with self.assertRaisesRegex(RuntimeError, "handled_ticket_ids"):
+                    supervisor.cycle("mid")
+                self.assertNotIn("processed_versions", self.status())
+                self.assertEqual(self.status()["status"], "failed")
+
+    def test_malformed_saved_handled_history_cannot_advance(self):
+        self.versions = {"1": "one"}
+        for handled in (None, "1", {"1": True}, 1, [True], [1.0], ["1"], [1, 0], [1, -1], [1, False]):
+            with self.subTest(handled=handled):
+                self.connection.state = {"handled_ticket_ids": handled}
+                with self.assertRaisesRegex(RuntimeError, "list of positive integer IDs"):
+                    supervisor.cycle("mid")
+                self.assertNotIn("processed_versions", self.status())
+
+    def test_partially_saved_reviewed_batch_cannot_advance(self):
+        self.versions = {"1": "one", "2": "two"}
+        self.connection.state = {"handled_ticket_ids": [1]}
+        with self.assertRaisesRegex(RuntimeError, r"missing reviewed ticket IDs \[2\]"):
+            supervisor.cycle("mid")
+        self.assertNotIn("processed_versions", self.status())
+
+    def test_missing_handled_history_preserves_checkpoint_and_retries_batch(self):
+        supervisor.cycle("mid")
+        saved = self.status()["processed_versions"]
+        self.connection.state = {"handled_ticket_ids": list(range(1, 21)),
+                                 "reviewed_ticket_ids": list(range(21, 41))}
+        with self.assertRaisesRegex(RuntimeError, "missing reviewed ticket IDs"):
+            supervisor.cycle("mid")
+        self.assertEqual(self.status()["processed_versions"], saved)
+        self.assertEqual(self.status()["status"], "failed")
+        self.assertIn("handled_ticket_ids", self.status()["error"])
+        self.connection.state["handled_ticket_ids"] = list(range(1, 41))
+        success = supervisor.cycle("mid")
+        self.assertEqual(success["selected_input_ids"], list(range(21, 41)))
+        self.assertEqual(success["pending_count"], 5)
+        self.assertEqual(set(success["processed_versions"]), {str(index) for index in range(1, 41)})
+        self.assertNotIn("error", self.status())
+        events = [json.loads(path.read_text()) for path in (self.runtime / "cycle-audit").glob("*/*.json")]
+        failures = [event for event in events if event["event"] == "failed"]
+        self.assertEqual(len(failures), 1)
+        self.assertIn("handled_ticket_ids", failures[0]["summary"])
+        self.assertEqual(sum(event["event"] == "completed" for event in events), 2)
+
+    def test_saved_history_does_not_replace_timestamp_or_report_checks(self):
+        self.connection.updated_at = datetime.now(timezone.utc) - timedelta(hours=1)
+        with self.assertRaisesRegex(RuntimeError, "state_saved=False"):
+            supervisor.cycle("mid")
+        self.assertNotIn("processed_versions", self.status())
+        self.connection.updated_at = None
+        def unsaved(*args, **kwargs):
+            result = completed(*args, **kwargs)
+            result["final"]["state_saved"] = False
+            return result
+        self.run.side_effect = unsaved
+        with self.assertRaisesRegex(RuntimeError, "state_saved=False"):
+            supervisor.cycle("mid")
+        self.assertNotIn("processed_versions", self.status())
+
+    def test_strong_does_not_require_mid_handled_history(self):
+        self.connection.state = {"theses": {}, "handled_ticket_ids": "unused by Strong"}
+        first = supervisor.cycle("strong")
+        self.assertEqual(set(first["processed_versions"]), {str(index) for index in range(1, 21)})
+        self.connection.state = {"theses": {}}
+        second = supervisor.cycle("strong")
+        self.assertEqual(second["selected_input_ids"], list(range(21, 41)))
+
+    def test_forced_empty_mid_cycle_does_not_require_handled_history(self):
+        self.versions = {}
+        self.connection.state = {}
+        result = supervisor.cycle("mid", force=True)
+        self.assertEqual(result["processed_versions"], {})
+        self.assertEqual(result["final"]["reviewed_ticket_ids"], [])
 
     def test_invalid_or_unselected_acknowledgments_cannot_advance(self):
         for ids in ([], [21], [True], [1, 1], [-1]):

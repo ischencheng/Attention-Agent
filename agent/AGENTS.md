@@ -130,6 +130,9 @@ compact a record's redundant fields while retaining its identity and evidence.
 `set` requires complete state; `merge` preserves omitted fields, but supplied
 lists replace the whole list and must include the retained identities and
 handled IDs. `reviewed_ticket_ids` may describe only the current batch.
+Mid must save every ID it returns in `reviewed_ticket_ids` in the cumulative
+`handled_ticket_ids` list as a positive integer. The scheduler verifies this
+saved list before acknowledging the batch; batch-only fields do not replace it.
 Rejected saves exit nonzero and leave stored state unchanged: read the latest
 state and correct the update before reporting success. Saves are serialized per
 agent and merges read the latest locked state. This does not detect stale
