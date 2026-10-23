@@ -176,10 +176,10 @@ def _cycle_locked(role, force, previous, status_path, attempt):
                  codex_bin=os.environ.get("CODEX_BIN", str(CODEX)), network_access=True,
                  environment_profile="research")
     with connect() as conn, conn.cursor() as cur:
-        cur.execute("SELECT updated_at FROM agent_state WHERE agent_id=%s", (state_id,))
+        cur.execute("SELECT state, updated_at FROM agent_state WHERE agent_id=%s", (state_id,))
         row = cur.fetchone()
     final = result["final"]
-    state_saved = bool(row and row[0] >= started and final["state_saved"])
+    state_saved = bool(row and row[1] >= started and final["state_saved"])
     if final["role"] != role or final["status"] == "blocked" or not state_saved:
         raise RuntimeError(f"{role} cycle incomplete; state_saved={state_saved}; artifacts={output}")
     reviewed = final[review_field]
@@ -188,6 +188,13 @@ def _cycle_locked(role, force, previous, status_path, attempt):
         raise RuntimeError(f"{role} returned invalid or unselected reviewed IDs; artifacts={output}")
     if selected and not reviewed:
         raise RuntimeError(f"{role} did not handle any selected pending inputs; artifacts={output}")
+    if role == "mid" and reviewed:
+        handled = row[0].get("handled_ticket_ids") if isinstance(row[0], dict) else None
+        if not isinstance(handled, list) or any(type(value) is not int or value <= 0 for value in handled):
+            raise RuntimeError(f"mid saved handled_ticket_ids must be a list of positive integer IDs; artifacts={output}")
+        missing = sorted(set(reviewed) - set(handled))
+        if missing:
+            raise RuntimeError(f"mid saved handled_ticket_ids is missing reviewed ticket IDs {missing}; artifacts={output}")
     for row_id in reviewed:
         processed[str(row_id)] = versions[str(row_id)]
     completed = time.time()
