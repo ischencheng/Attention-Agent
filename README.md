@@ -1,17 +1,36 @@
-# AI Attention Proxy
+# AI Attention Proxy: Financial Decision RL Environment
 
-Infrastructure for delegating information consumption to AI: filter noise,
-accumulate useful evidence across time and sources, and free human attention.
-Downstream agents consume the resulting context and can inspect the originals
-behind it. Investment research is the current downstream application.
+Train and evaluate an agent's ability to discover financial research questions,
+inspect evidence, revise a thesis and commit forecasts before outcomes arrive.
+The task is long-term judgment over an evolving information stream, with the
+original source and decision path available for inspection.
 
-- **Fast:** route potentially valuable information without premature summaries.
-- **Mid:** organize facts and relationships beside the original material.
-- **Strong:** use the original evidence when making a decision.
+The [financial decision environment](environments/financial_decision/README.md)
+provides an offline `reset`/`step` interface, read/judge/forecast/wait actions,
+time-gated evidence, preserved thesis history, delayed forecast rewards and an
+optional Gymnasium adapter. Run the free synthetic example:
 
-The product contract is [delegated information consumption](PRODUCT.md): preserve
-source context, reduce repeated reading, and let sufficient evidence determine
-whether a judgment is warranted.
+```bash
+python -m pip install -e .
+python -m environments.financial_decision demo --output /tmp/attention-rl-demo --seed 7
+```
+
+The demo uses fictional data and a hand-written policy. It demonstrates episode
+execution and traceability; model weight training and investment performance
+require separate experiments.
+
+The environment builds on Attention Proxy's
+[delegated information consumption](PRODUCT.md) pipeline:
+
+- **Fast:** allocate attention to potentially useful originals.
+- **Mid:** accumulate facts, source relationships and unresolved questions.
+- **Strong:** maintain a judgment, preserve counterevidence and decide whether a
+  testable forecast is warranted.
+
+Entities emerge from the configured topics. Research, abstention and waiting are
+valid actions; there is no required portfolio or trade.
+
+## Production pipeline
 
 The existing stack connects multi-source ingestion, Kafka/Flink, LLM workers,
 PostgreSQL, FastAPI and a React dashboard. See [CLAUDE.md](CLAUDE.md) for the

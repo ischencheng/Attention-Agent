@@ -10,7 +10,18 @@ sources, [TASK.md](TASK.md) for the target behavior, and [VERIFICATION.md](VERIF
 for what has actually run. The task contract is broader than this first runtime;
 the limitations below are part of its reported status.
 
-## Run locally
+## Financial decision RL interface
+
+For policy training and offline evaluation, start with the
+[financial decision environment](../financial_decision/README.md). It provides
+reset/step, explicit actions, a reward contract and a free synthetic episode.
+
+The actual production pipeline runs through `scripts/local_pipeline.py`; see
+[LOCAL_RUNTIME.md](../../LOCAL_RUNTIME.md). Its independent evaluator observes
+actual Strong decision packets and research state. The RSS commands below are a
+separate historical pilot and do not run the production pipeline.
+
+## Legacy RSS pilot
 
 From the repository root, with Python 3.12 and Codex CLI **0.163.0**:
 
@@ -49,11 +60,9 @@ Separate commands are available:
 .venv/bin/python environments/attention_judgment/daily.py --settle-only
 ```
 
-For this chat, a weekday 16:35 America/New_York heartbeat invokes the daily loop.
-It requires this machine and the Codex app to be available; this is not an always-on
-cloud deployment. Quiet runs do not need notifications; material discoveries,
-changed theses, matured outcomes, due research reviews and failures do. Week/month
-resolution is handled in the same daily loop. Holidays and early closes use XNYS.
+The pilot requires an explicit invocation; it is separate from the production
+supervisor and its heartbeat. Week/month resolution uses the same settlement
+implementation. Holidays and early closes use XNYS.
 
 ## Original stream and bounded pilot
 
@@ -136,7 +145,8 @@ frozen claims/invalidation can be checked independently. The runtime queues
 research and due reviews, but its controlled candidate cannot browse extra
 material. The heartbeat can inspect saved/new evidence and surface unresolved
 research needs. There is no automated fundamental truth oracle or claim that the
-framework itself learns weights. RL training is not implemented.
+framework itself learns weights. The [offline RL interface](../financial_decision/README.md)
+provides environment transitions and rewards; a policy trainer owns weight updates.
 
 ## Tests and controlled replay
 

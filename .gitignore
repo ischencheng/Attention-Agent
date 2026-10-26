@@ -36,3 +36,8 @@ ts-agents/node_modules/
 package-lock.json
 ts-agents/package-lock.json
 frontend-react/dist/
+
+# Python package builds
+*.egg-info/
+/build/
+/dist/
