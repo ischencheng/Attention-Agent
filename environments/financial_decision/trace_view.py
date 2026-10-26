@@ -26,6 +26,7 @@ def render_trace(records: list[dict], summary: dict) -> str:
             continue
         before, after = record["observation"], record["next_observation"]
         action = record["action"]
+        action_type = action.get("type", "invalid action") if isinstance(action, dict) else "invalid action"
         description = ''
         if record["info"].get("rejection"):
             description = '<p>Action rejected: ' + escape(record["info"]["rejection"]) + '</p>'
@@ -59,7 +60,7 @@ def render_trace(records: list[dict], summary: dict) -> str:
                     description += escape(round(result["score"], 6)) + '</p>'
                 description += '</aside>'
         cards.append('<section><h2>Step ' + escape(record["step"]) + ' · '
-                     + escape(action.get("type", "invalid action")) + '</h2>'
+                     + escape(action_type) + '</h2>'
                      + '<p>' + escape(before["current_time"]) + ' → ' + escape(after["current_time"])
                      + ' · Reward ' + escape(record["reward"]) + '</p>' + description
                      + '<details><summary>Exact action and reward breakdown</summary><pre>'

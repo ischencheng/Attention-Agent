@@ -140,9 +140,14 @@ class CliTests(unittest.TestCase):
         self.assertIn("SYNTHETIC", text)
 
     def test_rejected_malformed_action_still_exports_readable_trace(self):
-        summary = run_episode(FIXTURE, self.root / "invalid", actions=[{"type": "judge", "judgment": "invalid"}])
-        self.assertEqual(summary["status"], "unfinished")
-        self.assertEqual(summary["rejected_actions"], 1)
+        for index, action in enumerate(({"type": "judge", "judgment": "invalid"}, [], None, "invalid", 37, True)):
+            with self.subTest(action=action):
+                output = self.root / f"invalid-{index}"
+                summary = run_episode(FIXTURE, output, actions=[action])
+                self.assertEqual(summary["status"], "unfinished")
+                self.assertEqual(summary["rejected_actions"], 1)
+                self.assertIn("Action rejected", (output / "trace.html").read_text())
+                self.assertEqual(set(summary["artifacts"].values()), {p.name for p in output.iterdir()})
 
 
 if __name__ == "__main__":
