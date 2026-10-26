@@ -452,6 +452,36 @@ class SchedulerTests(unittest.TestCase):
         })
         self.assertEqual(self.status("strong")["last_review_epoch"], self.prior_review)
 
+    def test_interrupted_model_cannot_lose_due_review_after_moving_db_deadline(self):
+        self.prepare_thesis_review()
+        prior = self.status("strong")
+        def interrupt_after_db_write(*args, **kwargs):
+            self.connection.state["theses"]["supply"]["next_review_at"] = (
+                datetime.now(timezone.utc) + timedelta(days=1)
+            ).isoformat()
+            raise KeyboardInterrupt("service stopped before review verification")
+        self.run.side_effect = interrupt_after_db_write
+        with self.assertRaises(KeyboardInterrupt):
+            supervisor.cycle("strong")
+        interrupted = self.status("strong")
+        self.assertEqual(interrupted.get("pending_thesis_reviews"), {"supply": self.deadline})
+        self.assertEqual(interrupted, {**prior, "pending_thesis_reviews": {"supply": self.deadline}})
+        self.assertEqual(interrupted["processed_versions"], prior["processed_versions"])
+        self.assertEqual(interrupted["last_review_epoch"], prior["last_review_epoch"])
+        self.assertEqual(interrupted["completed_epoch"], prior["completed_epoch"])
+        self.assertNotIn("scheduled_review", self.connection.state["theses"]["supply"])
+        # A new invocation reads only the checkpoint and canonical DB state;
+        # there are no new annotations and the daily timer is still recent.
+        self.run.side_effect = self.save_thesis_review
+        restarted = supervisor.cycle("strong")
+        self.assertEqual(self.run.call_count, 2)
+        self.assertFalse(restarted["daily_review"])
+        self.assertEqual(restarted["due_thesis_reviews"], {"supply": self.deadline})
+        self.assertEqual(restarted["pending_thesis_reviews"], {})
+        self.assertEqual(restarted["last_review_epoch"], prior["last_review_epoch"])
+        self.assertEqual(supervisor.cycle("strong")["status"], "waiting_for_new_evidence")
+        self.assertEqual(self.run.call_count, 2)
+
 
 class Process:
     _pid = 100

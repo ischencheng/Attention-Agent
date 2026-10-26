@@ -276,6 +276,11 @@ def _cycle_locked(role, force, previous, status_path, attempt):
                    "a fresh row timestamp or a claim of completion alone does not acknowledge a due review.")
     output = RUNTIME / "cycles" / f"{role}-{int(time.time())}-{uuid.uuid4().hex[:8]}"
     attempt["output_dir"] = output
+    if due:
+        # Write ahead of any model-side DB changes: service termination may
+        # bypass exception cleanup after next_review_at has already moved.
+        # Keep every successful acknowledgment unchanged until verification.
+        save(status_path, {**previous, "pending_thesis_reviews": due})
     started = datetime.now(timezone.utc)
     result = run(prompt, CYCLE_SCHEMA, workspace, output,
                  float(os.environ.get("CODEX_TIMEOUT_SECONDS", "900")),
