@@ -17,6 +17,14 @@ def write_json(path, value):
     Path(path).write_text(json.dumps(value, ensure_ascii=False, indent=2, allow_nan=False) + "\n")
 
 
+class InvalidPolicyOutput(ValueError):
+    """A completed model response cannot be decoded into an action batch."""
+
+    def __init__(self, message, invocation):
+        super().__init__(message)
+        self.invocation = invocation
+
+
 class CodexPolicy:
     """Select same-role action batches; only the environment executes their tools."""
 
@@ -33,9 +41,11 @@ class CodexPolicy:
         self.model, self.max_calls, self.timeout = model, max_calls, timeout
         self.codex_bin = str(codex_bin)
         self.calls = []
+        self.budget_exhausted = False
 
     def choose(self, observation):
         if len(self.calls) >= self.max_calls:
+            self.budget_exhausted = True
             return [{"type": "stop", "role": "strong", "reason": "Model invocation budget exhausted."}], None
         role = observation["suggested_role"]
         invocation_id = f"codex-{len(self.calls) + 1:04d}"
@@ -87,15 +97,40 @@ class CodexPolicy:
                     # and malformed final output already fail in codex_runner.
                     if item.get("type") not in {"agent_message", "reasoning", "error"}:
                         raise ValueError("Policy invoked a tool outside the replay environment")
-            actions = json.loads(result["final"]["actions_json"])
-            json.dumps(actions, allow_nan=False)
-            if not isinstance(actions, list) or not 1 <= len(actions) <= 8:
-                raise ValueError("Policy must return one to eight actions")
-            if any(not isinstance(a, dict) or a.get("role") != role for a in actions):
-                raise ValueError("Policy actions must match the assigned role")
+            # The transport adapter validates the outer structured response. Only
+            # the model-authored string inside it is eligible for format recovery.
+            raw_actions = result["final"]["actions_json"]
+            if not isinstance(raw_actions, str):
+                raise TypeError("Transport returned a non-string actions_json field")
+            record.update(usage=result.get("usage"), cli_version=result.get("cli_version"))
+            try:
+                actions = json.loads(raw_actions)
+                json.dumps(actions, allow_nan=False)
+                if not isinstance(actions, list) or not 1 <= len(actions) <= 8:
+                    raise ValueError("Policy must return one to eight actions")
+                if any(not isinstance(a, dict) or a.get("role") != role for a in actions):
+                    raise ValueError("Policy actions must match the assigned role")
+            except ValueError as exc:
+                message = f"{type(exc).__name__}: {exc}"
+                relative = Path("model-calls") / invocation_id / "invalid-output.json"
+                (self.output / relative).parent.mkdir(parents=True, exist_ok=True)
+                write_json(self.output / relative, {
+                    "invocation_id": invocation_id, "role": role, "output_origin": "model",
+                    "actions_json": raw_actions, "decoder_error": message,
+                })
+                record.update(status="invalid_output", error=message,
+                              raw_output_artifact=str(relative), raw_output_trainable=True,
+                              executed_action_indices=[], discarded_action_indices=[])
+                raise InvalidPolicyOutput(message, {
+                    "id": invocation_id, "role": role, "policy": "codex",
+                    "trainable": False, "action_origin": "decoder",
+                    "raw_output_trainable": True, "raw_output_artifact": str(relative),
+                }) from exc
             record.update(status="completed", usage=result.get("usage"),
                           cli_version=result.get("cli_version"), actions=deepcopy(actions))
             return actions, {"id": invocation_id, "role": role, "policy": "codex", "trainable": True}
+        except InvalidPolicyOutput:
+            raise
         except Exception as exc:
             record.update(status="failed", error=f"{type(exc).__name__}: {exc}")
             raise
@@ -138,7 +173,7 @@ def run_episode(manifest, output, *, actions=None, codex=False, model=None,
     feedback = []
     write_json(output / "reset.json", {"observation": observation, "info": reset_info})
 
-    def apply(action, invocation):
+    def apply(action, invocation, *, decoder_error=None):
         nonlocal observation
         before = observation["as_of"]
         dispatched = deepcopy(action)
@@ -147,11 +182,22 @@ def run_episode(manifest, output, *, actions=None, codex=False, model=None,
         if invocation:
             dispatched["invocation"] = invocation
         observation, reward, terminated, truncated, info = env.step(dispatched)
+        if decoder_error is not None:
+            # The environment receives an invalid action to consume its normal
+            # clock/step budget. This marker is harness output, never a decoded
+            # action that we attribute to the model.
+            info["environment_rejection"] = info.get("rejection")
+            info["rejection"] = decoder_error
+            info["result"] = {"status": "rejected", "reason": decoder_error,
+                              "action_origin": "decoder",
+                              "raw_output_artifact": invocation["raw_output_artifact"]}
         record = {"step": len(records) + 1, "as_of": before,
                   "role": dispatched.get("role"), "action": dispatched,
                   "result": info, "observation": observation, "reward": reward,
                   "terminated": terminated, "truncated": truncated,
                   "invocation": invocation}
+        if decoder_error is not None:
+            record["action_origin"] = "decoder"
         records.append(record)
         # Each completed action is durable even if a later model call fails.
         with (output / "trajectory.jsonl").open("a") as stream:
@@ -164,7 +210,17 @@ def run_episode(manifest, output, *, actions=None, codex=False, model=None,
             if policy:
                 # Each ephemeral call sees attempted actions and actual execution
                 # feedback from the previous batch, including rejection reasons.
-                batch, invocation = policy.choose({**observation, "execution_feedback": feedback})
+                try:
+                    batch, invocation = policy.choose({**observation, "execution_feedback": feedback})
+                except InvalidPolicyOutput as exc:
+                    done = apply({"type": "invalid_policy_output", "role": exc.invocation["role"]},
+                                 exc.invocation, decoder_error=str(exc))
+                    feedback = [{"step": records[-1]["step"], "action_origin": "decoder",
+                                 "action": deepcopy(records[-1]["action"]),
+                                 "result": deepcopy(records[-1]["result"])}]
+                    policy.calls[-1]["decoder_step"] = records[-1]["step"]
+                    write_json(output / "model-calls.json", policy.calls)
+                    continue
             else:
                 action = next(scripted, exhausted)
                 if action is exhausted:
@@ -208,8 +264,10 @@ def run_episode(manifest, output, *, actions=None, codex=False, model=None,
     summary = env.summary()
     summary.update(policy="codex" if codex else "scripted", run_status="failed" if error else "completed",
                    error=error, model_invocations=len(policy.calls) if policy else 0,
+                   policy_budget_exhausted=policy.budget_exhausted if policy else False,
                    evaluation_eligible=error is None and summary.get("complete", False),
                    rejected_actions=sum("rejection" in record["result"] for record in records),
+                   invalid_policy_outputs=sum(call["status"] == "invalid_output" for call in policy.calls) if policy else 0,
                    trainable_roles=["fast", "mid", "strong"] if codex else [],
                    training_performed=False, artifact_format="research-portfolio-rollout-v1")
     write_json(output / "summary.json", summary)
@@ -221,6 +279,7 @@ def run_episode(manifest, output, *, actions=None, codex=False, model=None,
         "reward": "terminal_net_portfolio_return", "trajectory_start": "source_intake",
         "trainable_roles": summary["trainable_roles"],
         "policy_action_segments": "candidate trainable outputs; linked by invocation.id",
+        "decoder_origin_segments": "harness markers, not trainable model actions; original malformed model output is retained in raw_output_artifact",
         "observation_and_tool_segments": "not trainable policy output",
         "token_ids_and_logprobs": "not supplied by this inference adapter",
         "training_performed": False,

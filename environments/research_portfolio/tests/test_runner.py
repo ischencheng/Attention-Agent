@@ -129,6 +129,124 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(result["counts"]["tickets"], 1)
         self.assertEqual(len(prompts), 2)
 
+    def test_malformed_inner_json_is_preserved_and_next_call_can_repair(self):
+        prompts = []
+        raw = '[{"type":"triage","role":"fast", BROKEN'
+
+        def fake(prompt, *args, **kwargs):
+            prompts.append(prompt)
+            if len(prompts) == 1:
+                return {"events": [], "final": {"actions_json": raw}, "usage": {"output_tokens": 12}}
+            self.assertIn("JSONDecodeError", prompt)
+            self.assertIn('"action_origin": "decoder"', prompt)
+            self.assertIn("Expecting property name enclosed in double quotes", prompt)
+            return {"events": [], "final": {"actions_json": json.dumps([
+                {"type": "triage", "role": "fast", "source_id": "capex",
+                 "disposition": "advance", "reason": "Track the issuer original."}])}}
+
+        output = self.root / "decode-repair"
+        summary = run_episode(FIXTURE, output, codex=True, policy_runner=fake, max_calls=2)
+        self.assertEqual(summary["run_status"], "completed")
+        self.assertTrue(summary["evaluation_eligible"])
+        self.assertTrue(summary["policy_budget_exhausted"])
+        self.assertEqual(summary["invalid_policy_outputs"], 1)
+        self.assertEqual(summary["rejected_actions"], 1)
+        self.assertEqual(summary["counts"]["tickets"], 1)
+        self.assertEqual(summary["steps"], 3)  # Invalid attempt, correction, budget stop.
+        self.assertEqual(summary["as_of"], "2026-06-05T20:00:00Z")
+        records = [json.loads(line) for line in (output / "trajectory.jsonl").read_text().splitlines()]
+        rejected = records[0]
+        self.assertEqual(rejected["action_origin"], "decoder")
+        self.assertEqual(rejected["action"]["type"], "invalid_policy_output")
+        self.assertFalse(rejected["invocation"]["trainable"])
+        self.assertTrue(rejected["invocation"]["raw_output_trainable"])
+        self.assertNotIn("action_index", rejected["invocation"])
+        raw_artifact = json.loads((output / rejected["invocation"]["raw_output_artifact"]).read_text())
+        self.assertEqual(raw_artifact["actions_json"], raw)
+        self.assertEqual(raw_artifact["output_origin"], "model")
+        calls = json.loads((output / "model-calls.json").read_text())
+        self.assertEqual(calls[0]["status"], "invalid_output")
+        self.assertEqual(calls[0]["executed_action_indices"], [])
+        self.assertEqual(calls[0]["decoder_step"], 1)
+        self.assertEqual(calls[0]["usage"], {"output_tokens": 12})
+        self.assertEqual(calls[1]["status"], "completed")
+        self.assertIn("decoder", (output / "trace.html").read_text())
+
+    def test_invalid_output_retries_obey_model_step_and_clock_budgets(self):
+        def fake(*args, **kwargs):
+            return {"events": [], "final": {"actions_json": "[malformed"}}
+
+        cases = [
+            ("calls", {"max_calls": 2}, 2, 3, True, False),
+            ("steps", {"max_calls": 8, "max_steps": 2}, 2, 2, False, True),
+            ("clock", {"max_calls": 8, "actions_per_cutoff": 1}, 4, 4, False, False),
+        ]
+        for name, config, calls, steps, budget_stop, truncated in cases:
+            with self.subTest(name=name):
+                result = run_episode(FIXTURE, self.root / name, codex=True, policy_runner=fake, **config)
+                self.assertEqual(result["run_status"], "completed")
+                self.assertEqual(result["model_invocations"], calls)
+                self.assertEqual(result["invalid_policy_outputs"], calls)
+                self.assertEqual(result["rejected_actions"], calls)
+                self.assertEqual(result["steps"], steps)
+                self.assertEqual(result["policy_budget_exhausted"], budget_stop)
+                self.assertEqual(result["truncated"], truncated)
+                self.assertEqual(result["as_of"], "2026-06-05T20:00:00Z")
+                self.assertEqual(result["counts"]["tickets"], 0)
+
+    def test_nonfinite_or_wrong_shape_inner_payload_is_a_rejected_attempt(self):
+        for index, raw in enumerate(('[]', '{"type":"triage"}',
+                                     '[{"role":"fast","value":NaN}]',
+                                     '[{"role":"strong","type":"stop","reason":"wrong role"}]')):
+            with self.subTest(raw=raw):
+                def fake(*args, **kwargs):
+                    return {"events": [], "final": {"actions_json": raw}}
+                result = run_episode(FIXTURE, self.root / f"format-{index}", codex=True,
+                                     policy_runner=fake, max_calls=1)
+                self.assertEqual(result["invalid_policy_outputs"], 1)
+                self.assertEqual(result["run_status"], "completed")
+                self.assertEqual(result["model_invocations"], 1)
+
+    def test_malformed_output_cannot_escape_loss_on_already_filled_positions(self):
+        actions = demo_actions()
+        first_wait = next(index for index, action in enumerate(actions) if action["type"] == "wait")
+        prefix = actions[:first_wait + 1]
+        by_role = {role: [action for action in prefix if action["role"] == role]
+                   for role in ("fast", "mid", "strong")}
+
+        def fake(prompt, *args, **kwargs):
+            observation = json.loads(prompt.split("\n\n", 1)[1])
+            if observation["account"]["positions"]:
+                payload = "[malformed after position was filled"
+            else:
+                payload = json.dumps([by_role[observation["suggested_role"]].pop(0)])
+            return {"events": [], "final": {"actions_json": payload}}
+
+        summary = run_episode(FIXTURE, self.root / "held-loss", codex=True,
+                              policy_runner=fake, max_calls=len(prefix) + 2)
+        self.assertEqual(summary["run_status"], "completed")
+        self.assertTrue(summary["policy_budget_exhausted"])
+        self.assertEqual(summary["invalid_policy_outputs"], 2)
+        self.assertLess(summary["reward"], 0)
+        self.assertTrue(summary["account"]["positions"])
+        self.assertEqual(summary["as_of"], "2026-06-05T20:00:00Z")
+        self.assertEqual(sum(event["type"] == "fill" for event in summary["account"]["ledger"]), 1)
+
+    def test_outer_protocol_and_external_tool_failures_do_not_enter_decode_recovery(self):
+        responses = [
+            {"events": [], "final": {"actions_json": []}},
+            {"events": [{"type": "item.completed", "item": {"type": "command_execution"}}],
+             "final": {"actions_json": "[malformed"}},
+        ]
+        for index, response in enumerate(responses):
+            with self.subTest(index=index):
+                result = run_episode(FIXTURE, self.root / f"hard-{index}", codex=True,
+                                     policy_runner=lambda *a, **kw: response, max_calls=8)
+                self.assertEqual(result["run_status"], "failed")
+                self.assertFalse(result["evaluation_eligible"])
+                self.assertEqual(result["model_invocations"], 1)
+                self.assertEqual(result["invalid_policy_outputs"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

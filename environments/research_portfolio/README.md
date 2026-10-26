@@ -59,6 +59,14 @@ Each call also receives the previous batch's executed actions and feedback,
 including rejection reasons. A rejection ends the batch so the policy can
 correct it before attempting dependent actions.
 
+Malformed action JSON or a malformed action batch consumes one rejected step
+and returns its decoder error to the next model call. The original output is
+retained under `model-calls/`; the budget-consuming marker is explicitly
+decoder-authored and excluded from trainable action segments. Call, step and
+time limits still apply. Transport failures and external tool calls remain
+failed runs. `policy_budget_exhausted` distinguishes a controller-enforced stop
+from a policy decision to finish.
+
 Every output directory must be new or empty. Artifacts include:
 
 - `episode.json` and `contract.json`: evaluator scenario, cost and horizon inputs,
@@ -97,6 +105,9 @@ metadata, fetched originals, routing tickets, accumulated themes, research
 questions, all thesis versions, discovered instruments, tool results, current
 account state and remaining action budgets. An instrument catalog describes
 data coverage; only explicit discovery returns candidates to the policy.
+`observation.execution_contract` exposes the frozen concentration limit, costs,
+cash constraints, order execution rules and terminal valuation convention, so
+policies can plan valid allocations without guessing hidden constraints.
 
 | Role | Actions and responsibilities |
 | --- | --- |
