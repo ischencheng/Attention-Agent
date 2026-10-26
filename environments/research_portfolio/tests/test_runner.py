@@ -110,6 +110,25 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(metadata[0]["executed_action_indices"], [0])
         self.assertEqual(metadata[0]["discarded_action_indices"], [1])
 
+    def test_rejected_action_feedback_reaches_the_corrective_model_call(self):
+        prompts = []
+        def fake(prompt, *args, **kwargs):
+            prompts.append(prompt)
+            if len(prompts) == 2:
+                self.assertIn('"execution_feedback"', prompt)
+                self.assertIn('"disposition": "retain"', prompt)
+                self.assertIn("disposition must be advance or ignore", prompt)
+            candidate = {"type": "triage", "role": "fast", "source_id": "capex",
+                         "disposition": "retain" if len(prompts) == 1 else "advance",
+                         "reason": "Track the original issuer report."}
+            return {"events": [], "final": {"actions_json": json.dumps([candidate])}}
+        result = run_episode(FIXTURE, self.root / "correction", codex=True,
+                             policy_runner=fake, max_calls=2)
+        self.assertEqual(result["run_status"], "completed")
+        self.assertEqual(result["rejected_actions"], 1)
+        self.assertEqual(result["counts"]["tickets"], 1)
+        self.assertEqual(len(prompts), 2)
+
 
 if __name__ == "__main__":
     unittest.main()

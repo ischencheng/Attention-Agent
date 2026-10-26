@@ -142,6 +142,17 @@ class ResearchPortfolioTests(unittest.TestCase):
         self.assertAlmostEqual(result[1], -0.2)
         self.assertTrue(result[3])
 
+    def test_public_action_contract_supports_a_valid_thesis_revision(self):
+        self.prepare_investment()
+        advertised = self.env.observation()["action_contract"]["actions"]["judge"]
+        self.assertIn("required", advertised["what_changed"])
+        revised = judgment(what_changed="Reassessed cash conversion uncertainty.")
+        self.assertTrue(set(revised) - {"type"} <= set(advertised))
+        self.ok(revised)
+        versions = self.env.observation()["theses"]["power-thesis"]["revisions"]
+        self.assertEqual(len(versions), 2)
+        self.assertEqual(versions[-1]["what_changed"], revised["what_changed"])
+
     def test_invalid_actions_advance_clock_and_settle(self):
         env = ResearchPortfolioEnv(fixture(), actions_per_cutoff=1)
         for _ in range(3):

@@ -55,6 +55,9 @@ events outside the replay interface are rejected. After a tool result, the model
 must be invoked again before a dependent judgment or allocation can execute.
 Same-role independent tool requests can be batched. Actions sampled for an old
 cutoff are discarded when time advances, with executed/discarded indices saved.
+Each call also receives the previous batch's executed actions and feedback,
+including rejection reasons. A rejection ends the batch so the policy can
+correct it before attempting dependent actions.
 
 Every output directory must be new or empty. Artifacts include:
 

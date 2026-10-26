@@ -56,6 +56,7 @@ class CodexPolicy:
             "The reward is final paper account net return at the fixed horizon; no points for activity. "
             "Use independent same-role actions in a batch; do not invent results of unexecuted tools. "
             "When you need a tool result before deciding, end the batch at that tool call. "
+            "Check execution_feedback for rejected actions and their reasons; correct them before proceeding. "
             "Use wait when further information requires time. Use stop only to end policy decisions. "
             "Source/ticket/theme IDs and actual tool outputs are in the observation.\n\n"
             + json.dumps(visible, ensure_ascii=False, allow_nan=False)
@@ -134,6 +135,7 @@ def run_episode(manifest, output, *, actions=None, codex=False, model=None,
                          runner=policy_runner, codex_bin=codex_bin) if codex else None
     scripted = iter(actions or [])
     exhausted = object()
+    feedback = []
     write_json(output / "reset.json", {"observation": observation, "info": reset_info})
 
     def apply(action, invocation):
@@ -160,7 +162,9 @@ def run_episode(manifest, output, *, actions=None, codex=False, model=None,
         done = False
         while not done:
             if policy:
-                batch, invocation = policy.choose(observation)
+                # Each ephemeral call sees attempted actions and actual execution
+                # feedback from the previous batch, including rejection reasons.
+                batch, invocation = policy.choose({**observation, "execution_feedback": feedback})
             else:
                 action = next(scripted, exhausted)
                 if action is exhausted:
@@ -169,6 +173,7 @@ def run_episode(manifest, output, *, actions=None, codex=False, model=None,
                                              "role": action.get("role"),
                                              "policy": "scripted", "trainable": False}
             cutoff = observation["as_of"]
+            feedback = []
             tools_executed = False
             executed_indices = []
             for action_index, action in enumerate(batch):
@@ -180,9 +185,12 @@ def run_episode(manifest, output, *, actions=None, codex=False, model=None,
                 action_invocation = ({**invocation, "action_index": action_index}
                                      if invocation else None)
                 done = apply(action, action_invocation)
+                feedback.append({"step": records[-1]["step"],
+                                 "action": deepcopy(records[-1]["action"]),
+                                 "result": deepcopy(records[-1]["result"])})
                 executed_indices.append(action_index)
                 tools_executed |= action.get("type") == "tool"
-                if done or observation["as_of"] != cutoff:
+                if done or observation["as_of"] != cutoff or "rejection" in records[-1]["result"]:
                     # Remaining model actions were sampled against an older cutoff.
                     break
             if policy and invocation:
