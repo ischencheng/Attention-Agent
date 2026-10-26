@@ -301,6 +301,187 @@ class SchedulerTests(unittest.TestCase):
         self.assertEqual(supervisor.cycle("strong")["status"], "waiting_for_new_evidence")
         self.run.assert_not_called()
 
+    def prepare_thesis_review(self, *, deadline=None):
+        self.versions = {}
+        self.cycle_time = datetime.now(timezone.utc)
+        self.deadline = deadline or (self.cycle_time - timedelta(minutes=1)).isoformat()
+        self.prior_review = self.cycle_time.timestamp() - 3600
+        supervisor.save(self.runtime / "strong.json", {
+            "role": "strong", "status": "completed", "processed_versions": {"9": "old"},
+            "last_review_epoch": self.prior_review, "completed_epoch": self.prior_review,
+        })
+        self.connection.state = {"theses": {"supply": {
+            "claim": "Capacity growth needs confirmation", "evidence_gaps": ["delivery timing"],
+            "next_review_at": self.deadline,
+        }}}
+
+    def save_thesis_review(self, *args, **kwargs):
+        thesis = self.connection.state["theses"]["supply"]
+        thesis["scheduled_review"] = {
+            "due_at": self.deadline, "reviewed_at": datetime.now(timezone.utc).isoformat(),
+            "outcome": "Unresolved: the original filing still lacks delivery timing.",
+        }
+        thesis["next_review_at"] = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
+        return completed(*args, **kwargs)
+
+    def test_due_thesis_wakes_recent_daily_timer_and_verifies_saved_disposition(self):
+        self.prepare_thesis_review()
+        self.run.side_effect = self.save_thesis_review
+        result = supervisor.cycle("strong")
+        self.assertEqual(self.run.call_count, 1)
+        self.assertFalse(result["daily_review"])
+        self.assertEqual(result["last_review_epoch"], self.prior_review)
+        self.assertEqual(result["due_thesis_reviews"], {"supply": self.deadline})
+        self.assertEqual(result["verified_thesis_reviews"]["supply"]["due_at"], self.deadline)
+        prompt = self.run.call_args.args[0]
+        self.assertIn(json.dumps({"supply": self.deadline}), prompt)
+        self.assertIn("scheduled_review", prompt)
+        self.assertIn("original", prompt)
+        self.assertEqual(self.connection.state["theses"]["supply"]["evidence_gaps"], ["delivery timing"])
+        events = [json.loads(path.read_text()) for path in
+                  (self.runtime / "cycle-audit" / result["cycle_id"]).glob("*.json")]
+        for event in events:
+            self.assertEqual(event["due_thesis_reviews"], {"supply": self.deadline})
+        self.assertEqual(supervisor.cycle("strong")["status"], "waiting_for_new_evidence")
+        self.assertEqual(self.run.call_count, 1)
+
+    def test_future_or_absent_thesis_deadline_keeps_idle_cycle_free(self):
+        self.prepare_thesis_review(deadline=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat())
+        self.connection.state["theses"]["legacy"] = {"claim": "No deadline was registered"}
+        self.assertEqual(supervisor.cycle("strong")["status"], "waiting_for_new_evidence")
+        self.run.assert_not_called()
+
+    def test_force_requests_continuing_research_without_claiming_daily_review(self):
+        self.prepare_thesis_review(deadline=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat())
+        result = supervisor.cycle("strong", force=True)
+        prompt = self.run.call_args.args[0]
+        self.assertIn("Forced continuing research review: True", prompt)
+        self.assertIn("Daily thesis review due: False", prompt)
+        self.assertEqual(result["last_review_epoch"], self.prior_review)
+
+    def test_due_deadline_equality_uses_aware_utc_and_supports_legacy_lists(self):
+        moment = datetime(2026, 10, 26, 20, 0, tzinfo=timezone.utc)
+        deadline = "2026-10-26T16:00:00-04:00"
+        self.prepare_thesis_review(deadline=deadline)
+        self.connection.state["theses"] = [dict(self.connection.state["theses"]["supply"], thesis_id="supply")]
+        def persist(*args, **kwargs):
+            thesis = self.connection.state["theses"][0]
+            thesis["scheduled_review"] = {"due_at": deadline, "reviewed_at": moment.isoformat(),
+                                           "outcome": "Unresolved after checking the original evidence."}
+            thesis["next_review_at"] = (moment + timedelta(days=1)).isoformat()
+            return completed(*args, **kwargs)
+        self.run.side_effect = persist
+        with patch.object(supervisor, "now", return_value=moment.isoformat()):
+            result = supervisor.cycle("strong")
+        self.assertEqual(result["due_thesis_reviews"], {"supply": deadline})
+
+    def test_malformed_or_naive_thesis_deadline_fails_before_model_call(self):
+        for deadline in ("tomorrow", "2026-10-26", "2026-10-26T20:00:00", None, 42):
+            with self.subTest(deadline=deadline):
+                self.prepare_thesis_review()
+                self.connection.state["theses"]["supply"]["next_review_at"] = deadline
+                with self.assertRaisesRegex(ValueError, "next_review_at"):
+                    supervisor.cycle("strong")
+                self.assertEqual(self.status("strong")["last_review_epoch"], self.prior_review)
+        self.run.assert_not_called()
+
+    def test_unsaved_due_review_keeps_annotation_and_daily_checkpoints(self):
+        self.prepare_thesis_review()
+        self.versions = {"10": "pending"}
+        with self.assertRaisesRegex(RuntimeError, "scheduled_review"):
+            supervisor.cycle("strong")
+        failed = self.status("strong")
+        self.assertEqual(failed["processed_versions"], {"9": "old"})
+        self.assertEqual(failed["last_review_epoch"], self.prior_review)
+        self.run.side_effect = self.save_thesis_review
+        retried = supervisor.cycle("strong")
+        self.assertEqual(retried["selected_input_ids"], [10])
+        self.assertEqual(retried["processed_versions"]["10"], "pending")
+
+    def test_malformed_or_stale_due_disposition_cannot_acknowledge(self):
+        for invalid in ("removed", "wrong_deadline", "old_review", "naive_review", "empty_outcome", "still_due"):
+            with self.subTest(invalid=invalid):
+                self.prepare_thesis_review()
+                def persist_invalid(*args, **kwargs):
+                    result = self.save_thesis_review(*args, **kwargs)
+                    thesis = self.connection.state["theses"]["supply"]
+                    if invalid == "removed":
+                        del self.connection.state["theses"]["supply"]
+                    elif invalid == "wrong_deadline":
+                        thesis["scheduled_review"]["due_at"] = "2020-01-01T00:00:00Z"
+                    elif invalid == "old_review":
+                        thesis["scheduled_review"]["reviewed_at"] = self.deadline
+                    elif invalid == "naive_review":
+                        thesis["scheduled_review"]["reviewed_at"] = "2026-10-26T20:00:00"
+                    elif invalid == "empty_outcome":
+                        thesis["scheduled_review"]["outcome"] = "  "
+                    else:
+                        thesis["next_review_at"] = self.deadline
+                    return result
+                self.run.side_effect = persist_invalid
+                with self.assertRaises((RuntimeError, ValueError)):
+                    supervisor.cycle("strong")
+                self.assertEqual(self.status("strong")["last_review_epoch"], self.prior_review)
+                self.assertEqual(self.status("strong")["processed_versions"], {"9": "old"})
+
+    def test_moved_deadline_after_failed_review_remains_due_until_verified(self):
+        self.prepare_thesis_review()
+        def move_without_review(*args, **kwargs):
+            thesis = self.connection.state["theses"]["supply"]
+            thesis["next_review_at"] = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
+            return completed(*args, **kwargs)
+        self.run.side_effect = move_without_review
+        with self.assertRaisesRegex(RuntimeError, "scheduled_review"):
+            supervisor.cycle("strong")
+        self.assertEqual(self.status("strong")["pending_thesis_reviews"], {"supply": self.deadline})
+        self.run.side_effect = self.save_thesis_review
+        retried = supervisor.cycle("strong")
+        self.assertEqual(retried["due_thesis_reviews"], {"supply": self.deadline})
+        self.assertEqual(retried["pending_thesis_reviews"], {})
+        self.assertEqual(self.run.call_count, 2)
+        self.assertEqual(supervisor.cycle("strong")["status"], "waiting_for_new_evidence")
+
+    def test_every_captured_due_thesis_requires_a_saved_review(self):
+        self.prepare_thesis_review()
+        self.connection.state["theses"]["demand"] = {"next_review_at": self.deadline}
+        self.run.side_effect = self.save_thesis_review  # Only the supply thesis is reviewed.
+        with self.assertRaisesRegex(RuntimeError, "demand.*scheduled_review"):
+            supervisor.cycle("strong")
+        self.assertEqual(self.status("strong")["pending_thesis_reviews"], {
+            "supply": self.deadline, "demand": self.deadline,
+        })
+        self.assertEqual(self.status("strong")["last_review_epoch"], self.prior_review)
+
+    def test_interrupted_model_cannot_lose_due_review_after_moving_db_deadline(self):
+        self.prepare_thesis_review()
+        prior = self.status("strong")
+        def interrupt_after_db_write(*args, **kwargs):
+            self.connection.state["theses"]["supply"]["next_review_at"] = (
+                datetime.now(timezone.utc) + timedelta(days=1)
+            ).isoformat()
+            raise KeyboardInterrupt("service stopped before review verification")
+        self.run.side_effect = interrupt_after_db_write
+        with self.assertRaises(KeyboardInterrupt):
+            supervisor.cycle("strong")
+        interrupted = self.status("strong")
+        self.assertEqual(interrupted.get("pending_thesis_reviews"), {"supply": self.deadline})
+        self.assertEqual(interrupted, {**prior, "pending_thesis_reviews": {"supply": self.deadline}})
+        self.assertEqual(interrupted["processed_versions"], prior["processed_versions"])
+        self.assertEqual(interrupted["last_review_epoch"], prior["last_review_epoch"])
+        self.assertEqual(interrupted["completed_epoch"], prior["completed_epoch"])
+        self.assertNotIn("scheduled_review", self.connection.state["theses"]["supply"])
+        # A new invocation reads only the checkpoint and canonical DB state;
+        # there are no new annotations and the daily timer is still recent.
+        self.run.side_effect = self.save_thesis_review
+        restarted = supervisor.cycle("strong")
+        self.assertEqual(self.run.call_count, 2)
+        self.assertFalse(restarted["daily_review"])
+        self.assertEqual(restarted["due_thesis_reviews"], {"supply": self.deadline})
+        self.assertEqual(restarted["pending_thesis_reviews"], {})
+        self.assertEqual(restarted["last_review_epoch"], prior["last_review_epoch"])
+        self.assertEqual(supervisor.cycle("strong")["status"], "waiting_for_new_evidence")
+        self.assertEqual(self.run.call_count, 2)
+
 
 class Process:
     _pid = 100

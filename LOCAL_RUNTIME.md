@@ -82,7 +82,19 @@ Delivery remains at-least-once, so downstream consumers must retain deduplicatio
 
 The dashboard is at <http://localhost:5173>, API at <http://localhost:8000>, and
 Flink at <http://localhost:8081>. Mid checks pending inputs every 30 minutes;
-Strong checks every 40 minutes and reviews continuing research daily. Evaluation
+Strong checks every 40 minutes. Persisted thesis `next_review_at` deadlines
+trigger research independently of its daily review, including when no new
+annotations have arrived. The cycle records the selected thesis IDs and due
+times in its prompt and audit. A due thesis must save a `scheduled_review` with
+the captured `due_at`, a fresh `reviewed_at`, an `outcome` describing the evidence
+checks or remaining gap, and a future `next_review_at` on the thesis. The
+scheduler checks these saved fields before acknowledging completion. `--force`
+explicitly requests continuing research even between daily reviews. Empty
+ordinary cycles still skip the model.
+Failed review acknowledgments retain their captured deadlines for retry, even
+if the attempted state save already moved `next_review_at` into the future.
+
+Evaluation
 polls every five minutes. Schedules require this computer and Docker to be awake.
 The optional `scripts/install_local_service.py` installs the macOS LaunchAgent.
 

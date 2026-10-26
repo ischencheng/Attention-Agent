@@ -98,6 +98,72 @@ def signature(role):
         return {str(row[0]): row[1] for row in cur.fetchall()}
 
 
+def read_agent_state(state_id):
+    with connect() as conn, conn.cursor() as cur:
+        cur.execute("SELECT state, updated_at FROM agent_state WHERE agent_id=%s", (state_id,))
+        return cur.fetchone()
+
+
+def aware_utc(value, field):
+    try:
+        parsed = datetime.fromisoformat(value) if isinstance(value, str) else None
+    except ValueError:
+        parsed = None
+    if parsed is None or parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError(f"{field} must be an ISO timestamp with an explicit timezone")
+    return parsed.astimezone(timezone.utc)
+
+
+def thesis_records(state):
+    """Read the Strong map and the legacy thesis_id list without dropping IDs."""
+    if not isinstance(state, dict):
+        raise ValueError("Strong agent state must be an object")
+    theses = state.get("theses", {})
+    if isinstance(theses, dict):
+        items = theses.items()
+    elif isinstance(theses, list):
+        items = ((record.get("thesis_id") if isinstance(record, dict) else None, record)
+                 for record in theses)
+    else:
+        raise ValueError("Strong theses must be an object or a list of thesis_id records")
+    result = {}
+    for thesis_id, thesis in items:
+        if not isinstance(thesis_id, str) or not thesis_id.strip() or thesis_id in result or not isinstance(thesis, dict):
+            raise ValueError("Strong theses require unique nonempty IDs and object records")
+        result[thesis_id] = thesis
+    return result
+
+
+def due_thesis_reviews(state, cutoff):
+    due = {}
+    for thesis_id, thesis in thesis_records(state).items():
+        if "next_review_at" not in thesis:
+            continue  # Older research state did not register individual deadlines.
+        deadline = thesis["next_review_at"]
+        if aware_utc(deadline, f"theses[{thesis_id}].next_review_at") <= cutoff:
+            due[thesis_id] = deadline
+    return due
+
+
+def verify_thesis_reviews(state, due, started, checked_at):
+    theses = thesis_records(state)
+    verified = {}
+    for thesis_id, deadline in due.items():
+        thesis = theses.get(thesis_id, {})
+        review = thesis.get("scheduled_review")
+        if not isinstance(review, dict) or review.get("due_at") != deadline:
+            raise RuntimeError(f"Strong thesis {thesis_id} needs a saved scheduled_review for the captured deadline")
+        reviewed_at = aware_utc(review.get("reviewed_at"), f"theses[{thesis_id}].scheduled_review.reviewed_at")
+        outcome = review.get("outcome")
+        if (not started <= reviewed_at <= checked_at or not isinstance(outcome, str) or not outcome.strip()):
+            raise RuntimeError(f"Strong thesis {thesis_id} scheduled_review must have a fresh timestamp and a nonempty outcome")
+        if aware_utc(thesis.get("next_review_at"), f"theses[{thesis_id}].next_review_at") <= checked_at:
+            raise RuntimeError(f"Strong thesis {thesis_id} next_review_at must be in the future after review")
+        verified[thesis_id] = {"due_at": deadline, "reviewed_at": review["reviewed_at"],
+                               "outcome": safe_text(outcome), "next_review_at": thesis["next_review_at"]}
+    return verified
+
+
 def cycle(role, *, force=False):
     with lock(role):
         status_path = RUNTIME / f"{role}.json"
@@ -107,17 +173,22 @@ def cycle(role, *, force=False):
         try:
             result = _cycle_locked(role, force, previous, status_path, attempt)
             if result["status"] != "waiting_for_new_evidence":
-                write_event(RUNTIME / "cycle-audit", attempt["cycle_id"], "completed", terminal_summary(result))
+                write_event(RUNTIME / "cycle-audit", attempt["cycle_id"], "completed",
+                            {**terminal_summary(result), "daily_review": result["daily_review"],
+                             "forced": force, "due_thesis_reviews": result["due_thesis_reviews"],
+                             "verified_thesis_reviews": result["verified_thesis_reviews"]})
             return result
         except Exception as exc:
             write_event(RUNTIME / "cycle-audit", attempt["cycle_id"], "failed",
                         {"role": role, "status": "failed", "failed_at": now(),
                          "started_at": attempt["started_at"],
                          "error_type": type(exc).__name__, "summary": safe_text(exc),
+                         "due_thesis_reviews": attempt.get("due_thesis_reviews", {}),
                          **tool_events(attempt.get("output_dir"))})
             # Preserve the last successful acknowledgments; a failed attempt
             # must remain visible and retry the same pending versions.
             save(status_path, {**previous, "role": role, "status": "failed",
+                               "pending_thesis_reviews": attempt.get("due_thesis_reviews", previous.get("pending_thesis_reviews", {})),
                                "failed_at": now(), "error": f"{type(exc).__name__}: {exc}"})
             raise
 
@@ -133,7 +204,25 @@ def _cycle_locked(role, force, previous, status_path, attempt):
     selected = pending[:20]
     last_review = previous.get("last_review_epoch", previous.get("completed_epoch", 0))
     daily_review = role == "strong" and bool(last_review) and time.time() - last_review >= 86400
-    if not force and not pending and not daily_review:
+    state_id = os.environ.get(f"{role.upper()}_AGENT_ID", f"claude-{role}")
+    due = {}
+    if role == "strong":
+        # This canonical read runs under the same role lock as the model and
+        # acknowledgment. Individual deadlines are independent of the daily timer.
+        before = read_agent_state(state_id)
+        due = due_thesis_reviews(before[0] if before else {}, aware_utc(attempt["started_at"], "started_at"))
+        # A failed save can move a DB deadline without satisfying its review
+        # contract. Retain the captured obligation until this scheduler verifies it.
+        unacknowledged = previous.get("pending_thesis_reviews", {})
+        if not isinstance(unacknowledged, dict):
+            raise ValueError("pending_thesis_reviews must be an object")
+        for thesis_id, deadline in unacknowledged.items():
+            if not isinstance(thesis_id, str) or not thesis_id.strip():
+                raise ValueError("pending_thesis_reviews requires nonempty thesis IDs")
+            aware_utc(deadline, f"pending_thesis_reviews[{thesis_id}]")
+            due[thesis_id] = deadline
+    attempt["due_thesis_reviews"] = due
+    if not force and not pending and not daily_review and not due:
         return {"role": role, "status": "waiting_for_new_evidence", "input_count": len(versions),
                 "pending_count": 0}
     workspace = RUNTIME / "agents" / role
@@ -142,7 +231,6 @@ def _cycle_locked(role, force, previous, status_path, attempt):
     instructions = instructions.replace("/app/skills", str(ROOT / "skills"))
     instructions = instructions.replace("python ", str(PYTHON) + " ")
     (workspace / "AGENTS.md").write_text(instructions)
-    state_id = os.environ.get(f"{role.upper()}_AGENT_ID", f"claude-{role}")
     prompt = cycle_prompt(role, state_id).replace("/app/AGENTS.md", str(workspace / "AGENTS.md"))
     table = "attention_tickets" if role == "mid" else "annotations"
     write_event(RUNTIME / "cycle-audit", attempt["cycle_id"], "started",
@@ -151,6 +239,7 @@ def _cycle_locked(role, force, previous, status_path, attempt):
                  "selected_input_versions": {str(key): versions[str(key)] for key in selected},
                  "version_encoding": "MD5 of PostgreSQL payload::text for scheduler acknowledgment",
                  "daily_review": daily_review, "forced": force,
+                 "due_thesis_reviews": due,
                  "model": model, "environment_profile": "research"})
     review_field = "reviewed_ticket_ids" if role == "mid" else "reviewed_annotation_ids"
     prompt += (f"\nUse {PYTHON} for every Python skill. Current UTC time is {now()}. "
@@ -167,21 +256,45 @@ def _cycle_locked(role, force, previous, status_path, attempt):
                "If a source contains dated information, preserve its original date and distinguish it "
                "from today's ingestion date. A price observation is not a forecast. Register numeric "
                "probabilities only if your evidence supports one.")
+    if role == "strong":
+        prompt += (f"\nForced continuing research review: {force}. "
+                   f"Captured due thesis IDs and exact deadlines: {json.dumps(due)}. "
+                   "Daily reviews, captured thesis deadlines and an explicit forced review independently "
+                   "require continuing research, even without new annotations. Read the actual originals "
+                   "behind each thesis, check available supporting and contradicting evidence, invalidation "
+                   "conditions and unresolved questions. Actively address the stored evidence gaps with the "
+                   "available research tools. If retrieval fails, record the actual tool outcome and the "
+                   "remaining gap; unchanged annotation hashes alone do not justify moving review dates. "
+                   "Preserve thesis identities, questions and evidence "
+                   "when evidence remains insufficient; record what was checked and what remains unresolved. "
+                   "Do not turn a research review into an investment decision without adequate evidence. "
+                   "For EACH captured due thesis, save scheduled_review inside that thesis with due_at equal "
+                   "to its exact captured deadline, reviewed_at equal to the actual review time with an explicit "
+                   f"timezone (at or after cycle start {attempt['started_at']}), and outcome describing the "
+                   "originals checked, findings and unresolved gaps. Also save a future timezone-aware "
+                   "next_review_at. The scheduler will read these records back before acknowledging this cycle; "
+                   "a fresh row timestamp or a claim of completion alone does not acknowledge a due review.")
     output = RUNTIME / "cycles" / f"{role}-{int(time.time())}-{uuid.uuid4().hex[:8]}"
     attempt["output_dir"] = output
+    if due:
+        # Write ahead of any model-side DB changes: service termination may
+        # bypass exception cleanup after next_review_at has already moved.
+        # Keep every successful acknowledgment unchanged until verification.
+        save(status_path, {**previous, "pending_thesis_reviews": due})
     started = datetime.now(timezone.utc)
     result = run(prompt, CYCLE_SCHEMA, workspace, output,
                  float(os.environ.get("CODEX_TIMEOUT_SECONDS", "900")),
                  model,
                  codex_bin=os.environ.get("CODEX_BIN", str(CODEX)), network_access=True,
                  environment_profile="research")
-    with connect() as conn, conn.cursor() as cur:
-        cur.execute("SELECT state, updated_at FROM agent_state WHERE agent_id=%s", (state_id,))
-        row = cur.fetchone()
+    row = read_agent_state(state_id)
     final = result["final"]
     state_saved = bool(row and row[1] >= started and final["state_saved"])
     if final["role"] != role or final["status"] == "blocked" or not state_saved:
         raise RuntimeError(f"{role} cycle incomplete; state_saved={state_saved}; artifacts={output}")
+    verified_reviews = verify_thesis_reviews(
+        row[0], due, aware_utc(attempt["started_at"], "started_at"), aware_utc(now(), "checked_at")
+    ) if due else {}
     reviewed = final[review_field]
     if (any(type(value) is not int for value in reviewed) or len(set(reviewed)) != len(reviewed)
             or not set(reviewed) <= set(selected)):
@@ -202,6 +315,8 @@ def _cycle_locked(role, force, previous, status_path, attempt):
               "completed_at": now(), "completed_epoch": completed,
               "last_review_epoch": completed if role == "strong" and (daily_review or not last_review) else last_review,
               "selected_input_ids": selected, "pending_count": len(pending) - len(reviewed),
+              "due_thesis_reviews": due, "verified_thesis_reviews": verified_reviews,
+              "pending_thesis_reviews": {},
               "daily_review": daily_review, "final": final, "usage": result["usage"],
               "output_dir": str(output), "state_verified": True}
     save(status_path, record)
