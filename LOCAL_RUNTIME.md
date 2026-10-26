@@ -51,6 +51,12 @@ current tools. Run metadata records profile and variable names without values.
 This limits implicit inheritance; it does not isolate the research agents from
 host files or privileged storage services. See the implemented controls and
 remaining work in [agent execution boundaries](SECURITY_BOUNDARIES.md).
+Mid/Strong explicitly grant their Codex workspace write access to
+`environments/attention_judgment/runs/research-sources/`. The source skills use
+this shared directory for request locks, response snapshots and publication
+receipts. Each run records the resolved grant in `run.json`; the generic
+research profile adds no directory on its own.
+
 
 ## Upgrade the routing audit
 
