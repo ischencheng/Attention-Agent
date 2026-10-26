@@ -131,7 +131,7 @@ class ResearchPortfolioEnv:
             action = json_copy(action)
             result = self._execute(action)
             info["result"] = result
-        except (ValueError, TypeError, KeyError) as exc:
+        except ValueError as exc:
             info["rejection"] = str(exc)
             info["result"] = {"status": "rejected", "reason": str(exc)}
             # A non-JSON attempted action must not corrupt the JSON trajectory.
@@ -156,7 +156,12 @@ class ResearchPortfolioEnv:
                   "action": action, "result": info["result"], "observation": observation,
                   "reward": reward, "terminated": self.terminated, "truncated": self.truncated}
         if isinstance(action, dict) and "invocation" in action:
-            record["invocation"] = action["invocation"]
+            try:
+                record["invocation"] = self._invocation(action)
+            except ValueError:
+                # Preserve malformed input in action, never promote it to
+                # verified trace metadata consumed by viewers or trainers.
+                pass
         self.trajectory.append(copy.deepcopy(record))
         return observation, reward, self.terminated, self.truncated, copy.deepcopy(info)
 
@@ -200,11 +205,11 @@ class ResearchPortfolioEnv:
             raise ValueError("unknown action fields")
         if "as_of" in action and action["as_of"] != self.now:
             raise ValueError("stale action as_of; re-read the observation")
-        if "invocation" in action and not isinstance(action["invocation"], dict):
-            raise ValueError("invocation must be an object")
         role = action.get("role")
-        if role not in {"fast", "mid", "strong"}:
+        if not isinstance(role, str) or role not in {"fast", "mid", "strong"}:
             raise ValueError("role must be fast, mid or strong")
+        if "invocation" in action:
+            self._invocation(action)
         expected = {"triage": "fast", "accumulate": "mid"}.get(kind, "strong")
         if kind != "tool" and role != expected:
             raise ValueError(f"{kind} belongs to the {expected} role")
@@ -219,11 +224,31 @@ class ResearchPortfolioEnv:
             return {"status": "cancelled", "order": self.market.cancel(self.now, reason)}
         return getattr(self, f"_{kind}")(action)
 
+    @staticmethod
+    def _invocation(action):
+        metadata = action["invocation"]
+        required = {"id", "role", "policy", "trainable"}
+        if (not isinstance(metadata, dict) or not required <= set(metadata)
+                or set(metadata) - required - {"action_index"}):
+            raise ValueError("invocation requires id, role, policy, trainable and optional action_index")
+        text(metadata["id"], "invocation id")
+        role = metadata["role"]
+        if not isinstance(role, str) or role not in {"fast", "mid", "strong"} or role != action.get("role"):
+            raise ValueError("invocation role must match the action role")
+        policy = metadata["policy"]
+        if not isinstance(policy, str) or policy not in {"codex", "scripted"}:
+            raise ValueError("invocation policy must be codex or scripted")
+        if type(metadata["trainable"]) is not bool:
+            raise ValueError("invocation trainable must be boolean")
+        if "action_index" in metadata and (type(metadata["action_index"]) is not int or metadata["action_index"] < 0):
+            raise ValueError("invocation action_index must be a nonnegative integer")
+        return copy.deepcopy(metadata)
+
     def _triage(self, action):
         source_id = text(action.get("source_id"), "source_id")
         if source_id not in self._visible_sources():
             raise ValueError("source is not available at this cutoff")
-        if action.get("disposition") not in {"advance", "ignore"}:
+        if not isinstance(action.get("disposition"), str) or action["disposition"] not in {"advance", "ignore"}:
             raise ValueError("disposition must be advance or ignore")
         reason = text(action.get("reason"), "reason")
         if source_id in self.triage:
@@ -274,7 +299,7 @@ class ResearchPortfolioEnv:
             self.role_reads[role].add(source_id)
         elif tool == "search":
             query = text(args.get("query"), "query")
-            if args.get("intent") not in {"support", "contradiction"}:
+            if not isinstance(args.get("intent"), str) or args["intent"] not in {"support", "contradiction"}:
                 raise ValueError("search intent must be support or contradiction")
             result = {"matches": [self._metadata(item) for item in sources.values() if self._matches(query, item)],
                       "coverage": "Only archived originals published and received by this cutoff. Empty search is not evidence of absence."}
@@ -292,8 +317,10 @@ class ResearchPortfolioEnv:
             bars = [bar for bar in self.market.snapshot()["bars"] if bar["asset_id"] == asset_id]
             result = {"asset_id": asset_id, "bars": bars, "status": "observed" if bars else "NO PRICE DATA", "price_basis": "raw"}
         else:
-            if "asset_id" in args and args["asset_id"] not in self.discovered_assets:
-                raise ValueError("framework asset must have been discovered")
+            if "asset_id" in args:
+                asset_id = text(args["asset_id"], "framework asset_id")
+                if asset_id not in self.discovered_assets:
+                    raise ValueError("framework asset must have been discovered")
             frozen = json.loads((Path(__file__).parent / "fixtures" / "mrbrain_framework.json").read_text())
             result = {"kind": "frozen_original_framework", "source": "skills/mrbrain_invest.py FRAMEWORK",
                       "original_framework": frozen,
@@ -325,7 +352,8 @@ class ResearchPortfolioEnv:
         for fact in facts:
             if not isinstance(fact, dict) or set(fact) != {"source_id", "claim"}:
                 raise ValueError("fact fields must be source_id and claim")
-            if fact["source_id"] not in source_ids:
+            source_id = text(fact["source_id"], "fact source_id")
+            if source_id not in source_ids:
                 raise ValueError("fact must cite an original belonging to the theme's tickets")
             text(fact["claim"], "fact claim")
         if {item["source_id"] for item in facts} != source_ids:
@@ -333,6 +361,8 @@ class ResearchPortfolioEnv:
         exception = action.get("authoritative_exception", False)
         if type(exception) is not bool:
             raise ValueError("authoritative_exception must be boolean")
+        if "exception_reason" in action and not isinstance(action["exception_reason"], str):
+            raise ValueError("exception_reason must be a string")
         sources = [self.read_sources[key] for key in sorted(source_ids)]
         if exception:
             text(action.get("exception_reason"), "exception_reason")
@@ -380,7 +410,7 @@ class ResearchPortfolioEnv:
         if not set(theme["source_ids"]) & (set(evidence) | set(contrary)):
             raise ValueError("judgment must retain evidence from its originating theme")
         string_list(action.get("invalidation_conditions"), "invalidation_conditions", nonempty=True)
-        if action.get("status") not in {"research", "investable", "invalidated"}:
+        if not isinstance(action.get("status"), str) or action["status"] not in {"research", "investable", "invalidated"}:
             raise ValueError("invalid thesis status")
         assets = string_list(action.get("asset_ids", []), "asset_ids")
         if any(item not in self.discovered_assets for item in assets):
@@ -401,7 +431,7 @@ class ResearchPortfolioEnv:
         for name, check in risks.items():
             if not isinstance(check, dict) or set(check) != {"status", "evidence_ids", "reason"}:
                 raise ValueError("risk check fields must be status, evidence_ids, reason")
-            if check["status"] not in {"PASS", "FAIL", "UNKNOWN"}:
+            if not isinstance(check["status"], str) or check["status"] not in {"PASS", "FAIL", "UNKNOWN"}:
                 raise ValueError("risk status must be PASS, FAIL or UNKNOWN")
             refs = string_list(check["evidence_ids"], "risk evidence_ids")
             if name != "leverage" and check["status"] == "PASS" and not refs:
@@ -411,7 +441,7 @@ class ResearchPortfolioEnv:
             text(check["reason"], "risk reason")
         if "confidence" in action and (type(action["confidence"]) not in {int, float} or not 0 <= action["confidence"] <= 1):
             raise ValueError("confidence must be a finite number in [0, 1]")
-        if previous:
+        if previous or "what_changed" in action:
             text(action.get("what_changed"), "what_changed for revision")
         revision = {key: copy.deepcopy(value) for key, value in action.items()
                     if key not in {"type", "role", "as_of", "invocation"}}

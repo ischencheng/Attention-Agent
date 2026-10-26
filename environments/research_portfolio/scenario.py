@@ -61,7 +61,7 @@ def load_manifest(value: dict | str | Path) -> dict:
     if type(data["schema_version"]) is not int or data["schema_version"] != 1:
         raise ValueError("unsupported manifest schema_version")
     text(data["episode_id"], "episode_id")
-    if data["mode"] not in {"synthetic", "historical_replay"}:
+    if not isinstance(data["mode"], str) or data["mode"] not in {"synthetic", "historical_replay"}:
         raise ValueError("mode must be synthetic or historical_replay")
     if data["price_basis"] != "raw":
         raise ValueError("only raw prices with explicit corporate actions are supported")

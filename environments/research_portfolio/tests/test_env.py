@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from environments.research_portfolio.env import FRAMEWORK_FIELDS, RISK_FIELDS, ResearchPortfolioEnv
 from environments.research_portfolio.scenario import load_manifest
@@ -160,6 +161,64 @@ class ResearchPortfolioTests(unittest.TestCase):
             self.assertEqual(self.env.questions, {})
             self.assertEqual(self.env.read_sources, {})
         json.dumps(self.env.trajectory, allow_nan=False)
+
+    def test_malformed_finite_json_fields_are_rejected_atomically(self):
+        env = ResearchPortfolioEnv(fixture(), actions_per_cutoff=1000, max_steps=1000)
+        self.prepare_investment(env)
+        bad_risks = copy.deepcopy(judgment()["risk_checks"])
+        bad_risks["bankruptcy"]["status"] = []
+        candidates = [
+            action("wait", role=[], reason="Malformed role."),
+            {"type": "triage", "role": "fast", "source_id": "earnings", "disposition": [], "reason": "Malformed disposition."},
+            tool("search", query="power", intent=[]),
+            tool("framework", asset_id=[]),
+            judgment(status=[]),
+            judgment(risk_checks=bad_risks),
+            judgment(what_changed=[]),
+            {"type": "accumulate", "role": "mid", "theme_id": "power-demand", "ticket_ids": ["ticket-earnings"],
+             "summary": "Revenue statement.", "facts": [{"source_id": [], "claim": "Bad identity."}],
+             "open_questions": ["Cash conversion?"], "authoritative_exception": False},
+            {"type": "accumulate", "role": "mid", "theme_id": "power-demand", "ticket_ids": ["ticket-earnings"],
+             "summary": "Revenue statement.", "facts": [{"source_id": "earnings", "claim": "Revenue grows."}],
+             "open_questions": ["Cash conversion?"], "authoritative_exception": False, "exception_reason": []},
+        ]
+        valid_metadata = {"id": "call-1", "role": "strong", "policy": "codex", "trainable": True}
+        malformed_metadata = [[], {}, {**valid_metadata, "id": []}, {**valid_metadata, "role": []},
+                              {**valid_metadata, "role": "mid"}, {**valid_metadata, "policy": []},
+                              {**valid_metadata, "trainable": 1}, {**valid_metadata, "action_index": []},
+                              {**valid_metadata, "action_index": -1}, {**valid_metadata, "extra": []}]
+        candidates.extend(action("wait", reason="Malformed metadata.", invocation=item) for item in malformed_metadata)
+        stable_keys = ("as_of", "read_sources", "triage", "tickets", "themes", "questions", "theses",
+                       "discovered_assets", "tool_results", "account")
+        for candidate in candidates:
+            with self.subTest(candidate=candidate):
+                before = env.observation()
+                step = env.steps
+                result = env.step(candidate)
+                self.assertIn("rejection", result[4])
+                self.assertEqual(env.steps, step + 1)
+                self.assertEqual({key: result[0][key] for key in stable_keys},
+                                 {key: before[key] for key in stable_keys})
+                if "invocation" in candidate:
+                    self.assertNotIn("invocation", env.trajectory[-1])
+        json.dumps(env.trajectory, allow_nan=False)
+
+    def test_malformed_fields_still_exhaust_the_clock_budget(self):
+        env = ResearchPortfolioEnv(fixture(), actions_per_cutoff=1)
+        for expected_time in TIMES[1:]:
+            result = env.step(action("wait", role=[], reason="Bad policy output cannot freeze time."))
+            self.assertIn("rejection", result[4])
+            self.assertEqual(result[0]["as_of"], expected_time)
+            self.assertEqual(result[0]["account"]["cash"], 1000)
+        self.assertTrue(result[2])
+        self.assertEqual(result[1], 0)
+
+    def test_internal_accounting_type_errors_are_not_policy_rejections(self):
+        self.prepare_investment()
+        with patch.object(self.env.market, "submit", side_effect=TypeError("accounting implementation failure")):
+            with self.assertRaisesRegex(TypeError, "accounting implementation failure"):
+                self.env.step(action("allocate", target_weights={"power": 0.5}, thesis_ids=["power-thesis"],
+                                     reason="Valid action encountering an internal error."))
 
     def test_mid_cannot_publish_without_its_own_original_read(self):
         self.ok({"type": "triage", "role": "fast", "source_id": "earnings", "disposition": "advance", "reason": "Research."})
@@ -322,6 +381,11 @@ class ResearchPortfolioTests(unittest.TestCase):
         bad["portfolio"]["initial_cash"] = float("inf")
         with self.assertRaises(ValueError):
             load_manifest(bad)
+        for value in ([], {}, None, 1):
+            bad = fixture()
+            bad["mode"] = value
+            with self.subTest(mode=value), self.assertRaises(ValueError):
+                load_manifest(bad)
 
 
 if __name__ == "__main__":
