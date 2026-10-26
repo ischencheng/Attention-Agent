@@ -1,0 +1,115 @@
+import json
+from pathlib import Path
+import tempfile
+import unittest
+
+from environments.research_portfolio.demo import demo_actions
+from environments.research_portfolio.runner import CodexPolicy, run_episode
+
+
+FIXTURE = Path(__file__).parents[1] / "fixtures" / "demo.json"
+
+
+class RunnerTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+        self.addCleanup(self.temp.cleanup)
+
+    def test_complete_workflow_replays_with_the_same_loss_and_provenance(self):
+        first = run_episode(FIXTURE, self.root / "first", actions=demo_actions())
+        self.assertTrue(first["evaluation_eligible"])
+        self.assertEqual(first["rejected_actions"], 0)
+        self.assertLess(first["reward"], 0)
+        self.assertEqual(first["counts"]["thesis_revisions"], 4)
+        self.assertGreater(first["account"]["cash"], 80000)
+        transcript = json.loads((self.root / "first/actions.json").read_text())
+        second = run_episode(self.root / "first/episode.json", self.root / "second", actions=transcript)
+        self.assertEqual(first["reward"], second["reward"])
+        self.assertEqual(first["account"], second["account"])
+        fills = [x for x in first["account"]["ledger"] if x["type"] == "fill"]
+        self.assertEqual(fills[-1]["decision_refs"], ["power-thesis:v2"])
+        self.assertTrue((self.root / "first/trace.html").is_file())
+
+    def test_transcript_exhaustion_marks_failure_but_settles_existing_exposure(self):
+        actions = demo_actions()
+        first_wait = next(i for i, a in enumerate(actions) if a["type"] == "wait")
+        result = run_episode(FIXTURE, self.root / "partial", actions=actions[:first_wait + 1])
+        self.assertEqual(result["run_status"], "failed")
+        self.assertFalse(result["evaluation_eligible"])
+        self.assertLess(result["reward"], 0)
+        self.assertEqual(result["as_of"], "2026-06-05T20:00:00Z")
+
+    def test_model_transport_failure_is_not_a_successful_cash_policy(self):
+        def fail(*args, **kwargs):
+            raise RuntimeError("transport unavailable")
+        result = run_episode(FIXTURE, self.root / "failure", codex=True, policy_runner=fail)
+        self.assertEqual(result["model_invocations"], 1)
+        self.assertFalse(result["evaluation_eligible"])
+        self.assertIn("transport unavailable", result["error"])
+        self.assertEqual(result["reward"], 0)
+
+    def test_external_tool_events_are_rejected_before_actions_execute(self):
+        def fake(*args, **kwargs):
+            return {"final": {"actions_json": '[{"role":"fast","type":"triage","source_id":"capex","disposition":"ignore","reason":"x"}]'},
+                    "events": [{"type": "item.completed", "item": {"type": "command_execution"}}]}
+        result = run_episode(FIXTURE, self.root / "external", codex=True, policy_runner=fake)
+        self.assertEqual(result["run_status"], "failed")
+        self.assertEqual(result["counts"]["tickets"], 0)
+
+    def test_policy_gets_no_future_prices_and_metadata_records_observed_call(self):
+        observed = {}
+        def fake(prompt, schema, cwd, output_dir, timeout, model, **kwargs):
+            observed.update(prompt=prompt, kwargs=kwargs)
+            return {"final": {"actions_json": '[{"role":"strong","type":"wait","reason":"await evidence"}]'},
+                    "events": [{"type": "item.completed", "item": {"type": "agent_message"}}],
+                    "usage": {"output_tokens": 20}, "cli_version": "test"}
+        policy = CodexPolicy(self.root, runner=fake, codex_bin="/explicit/codex", max_calls=1)
+        actions, metadata = policy.choose({"suggested_role": "strong", "as_of": "2026-06-01T20:00:00Z"})
+        self.assertEqual(actions[0]["type"], "wait")
+        self.assertEqual(metadata["role"], "strong")
+        self.assertTrue(observed["kwargs"]["disable_tools"])
+        self.assertEqual(observed["kwargs"]["codex_bin"], "/explicit/codex")
+        self.assertNotIn("future_prices", observed["prompt"])
+        exhausted, invocation = policy.choose({})
+        self.assertEqual(exhausted[0]["type"], "stop")
+        self.assertIsNone(invocation)
+
+    def test_nonempty_output_is_preserved(self):
+        out = self.root / "existing"
+        out.mkdir()
+        (out / "keep").write_text("prior run")
+        with self.assertRaisesRegex(ValueError, "new or empty"):
+            run_episode(FIXTURE, out, actions=demo_actions())
+        self.assertEqual((out / "keep").read_text(), "prior run")
+
+    def test_nonfinite_or_nonobject_transcripts_fail_before_execution(self):
+        for actions in ([None], [{"role": "strong", "type": "stop", "reason": float("nan")}],
+                        [{"role": "strong", "type": "stop", "reason": "done"}, None]):
+            with self.subTest(actions=actions), self.assertRaises(ValueError):
+                run_episode(FIXTURE, self.root / "invalid", actions=actions)
+        self.assertFalse((self.root / "invalid").exists())
+
+    def test_model_resamples_after_tool_result_before_routing(self):
+        calls = []
+        def fake(prompt, *args, **kwargs):
+            calls.append(prompt)
+            if len(calls) == 1:
+                actions = [{"type": "tool", "role": "fast", "tool": "read", "args": {"source_id": "capex"}},
+                           {"type": "triage", "role": "fast", "source_id": "capex", "disposition": "advance", "reason": "unseen result"}]
+            else:
+                raise RuntimeError("stop after boundary probe")
+            return {"events": [{"type": "item.completed", "item": {"type": "error", "message": "configuration notice"}}],
+                    "final": {"actions_json": json.dumps(actions)}}
+        result = run_episode(FIXTURE, self.root / "boundary", codex=True, policy_runner=fake)
+        self.assertEqual(result["counts"]["read_sources"], 1)
+        self.assertEqual(result["counts"]["tickets"], 0)
+        self.assertEqual(len(calls), 2)
+        self.assertIn("Backlog", calls[1].replace("backlog", "Backlog"))
+        metadata = json.loads((self.root / "boundary/model-calls.json").read_text())
+        self.assertEqual(metadata[0]["executed_action_indices"], [0])
+        self.assertEqual(metadata[0]["discarded_action_indices"], [1])
+
+
+if __name__ == "__main__":
+    unittest.main()

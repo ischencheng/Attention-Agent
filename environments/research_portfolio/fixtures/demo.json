@@ -1,0 +1,245 @@
+{
+  "schema_version": 1,
+  "episode_id": "synthetic-power-research-v1",
+  "mode": "synthetic",
+  "price_basis": "raw",
+  "timeline": [
+    "2026-06-01T20:00:00Z",
+    "2026-06-02T20:00:00Z",
+    "2026-06-03T20:00:00Z",
+    "2026-06-04T20:00:00Z",
+    "2026-06-05T20:00:00Z"
+  ],
+  "scope": [
+    "AI infrastructure",
+    "power",
+    "storage",
+    "capital expenditure",
+    "earnings",
+    "valuation"
+  ],
+  "portfolio": {
+    "initial_cash": 100000,
+    "fee_bps": 10,
+    "slippage_bps": 5,
+    "max_weight": 0.8
+  },
+  "assets": [
+    {
+      "asset_id": "lyps",
+      "symbol": "LYPS",
+      "name": "Lanyu Power Systems (fictional)",
+      "available_at": "2026-06-01T12:00:00Z",
+      "terms": [
+        "Lanyu",
+        "power",
+        "equipment",
+        "datacenter"
+      ]
+    },
+    {
+      "asset_id": "hbst",
+      "symbol": "HBST",
+      "name": "Harbor Storage (fictional)",
+      "available_at": "2026-06-01T12:00:00Z",
+      "terms": [
+        "Harbor",
+        "storage",
+        "battery",
+        "datacenter"
+      ]
+    }
+  ],
+  "bars": [
+    {
+      "asset_id": "lyps",
+      "open_at": "2026-06-01T13:30:00Z",
+      "close_at": "2026-06-01T20:00:00Z",
+      "open": 100,
+      "close": 100
+    },
+    {
+      "asset_id": "lyps",
+      "open_at": "2026-06-02T13:30:00Z",
+      "close_at": "2026-06-02T20:00:00Z",
+      "open": 101,
+      "close": 98
+    },
+    {
+      "asset_id": "lyps",
+      "open_at": "2026-06-03T13:30:00Z",
+      "close_at": "2026-06-03T20:00:00Z",
+      "open": 96,
+      "close": 92
+    },
+    {
+      "asset_id": "lyps",
+      "open_at": "2026-06-04T13:30:00Z",
+      "close_at": "2026-06-04T20:00:00Z",
+      "open": 91,
+      "close": 93
+    },
+    {
+      "asset_id": "lyps",
+      "open_at": "2026-06-05T13:30:00Z",
+      "close_at": "2026-06-05T20:00:00Z",
+      "open": 93,
+      "close": 94
+    },
+    {
+      "asset_id": "hbst",
+      "open_at": "2026-06-01T13:30:00Z",
+      "close_at": "2026-06-01T20:00:00Z",
+      "open": 50,
+      "close": 50
+    },
+    {
+      "asset_id": "hbst",
+      "open_at": "2026-06-02T13:30:00Z",
+      "close_at": "2026-06-02T20:00:00Z",
+      "open": 50,
+      "close": 51
+    },
+    {
+      "asset_id": "hbst",
+      "open_at": "2026-06-03T13:30:00Z",
+      "close_at": "2026-06-03T20:00:00Z",
+      "open": 51,
+      "close": 52
+    },
+    {
+      "asset_id": "hbst",
+      "open_at": "2026-06-04T13:30:00Z",
+      "close_at": "2026-06-04T20:00:00Z",
+      "open": 52,
+      "close": 53
+    },
+    {
+      "asset_id": "hbst",
+      "open_at": "2026-06-05T13:30:00Z",
+      "close_at": "2026-06-05T20:00:00Z",
+      "open": 53,
+      "close": 54
+    }
+  ],
+  "corporate_actions": [],
+  "sources": [
+    {
+      "id": "capex",
+      "source": "issuer",
+      "event_id": "capex-report",
+      "available_at": "2026-06-01T18:00:00Z",
+      "published_at": "2026-06-01T17:00:00Z",
+      "title": "Lanyu reports power equipment backlog growth",
+      "body": "Lanyu Power Systems reports equipment backlog up 30 percent year over year. It supplies power equipment to data centers. Management expects conversion over two years; this is backlog, not recognized revenue. It reports net cash and positive operating cash flow. Higher capex may absorb cash before deliveries.",
+      "terms": [
+        "Lanyu",
+        "power",
+        "equipment",
+        "backlog",
+        "datacenter",
+        "capex"
+      ],
+      "authority": true
+    },
+    {
+      "id": "permits",
+      "source": "regulator",
+      "event_id": "permit-review",
+      "available_at": "2026-06-01T18:00:00Z",
+      "published_at": "2026-06-01T17:00:00Z",
+      "title": "Utility permits approved, grid work remains",
+      "body": "The regional utility approves permits for two new data center substations. Equipment delivery dates and physical grid connection remain separate milestones. The approval does not identify a supplier or guarantee orders.",
+      "terms": [
+        "power",
+        "datacenter",
+        "grid",
+        "permits"
+      ],
+      "authority": true
+    },
+    {
+      "id": "supplier",
+      "source": "trade_press",
+      "event_id": "supply-interviews",
+      "available_at": "2026-06-01T18:00:00Z",
+      "published_at": "2026-06-01T17:00:00Z",
+      "title": "Transformer supply chain remains tight",
+      "body": "Independent supplier interviews describe long transformer lead times. Lanyu is one possible vendor but orders are not confirmed. Harbor Storage sells battery backup equipment with a different delivery cycle. Supplier interviews may be biased.",
+      "terms": [
+        "Lanyu",
+        "Harbor",
+        "power",
+        "storage",
+        "equipment",
+        "datacenter"
+      ],
+      "authority": false
+    },
+    {
+      "id": "sports",
+      "source": "local_news",
+      "event_id": "sports-event",
+      "available_at": "2026-06-01T18:00:00Z",
+      "published_at": "2026-06-01T17:00:00Z",
+      "title": "Local football final announced",
+      "body": "A local football final is scheduled for Saturday. No material financial or infrastructure information is reported.",
+      "terms": [
+        "sports",
+        "football"
+      ],
+      "authority": false
+    },
+    {
+      "id": "delay",
+      "source": "issuer",
+      "event_id": "delivery-delay",
+      "available_at": "2026-06-02T18:00:00Z",
+      "published_at": "2026-06-02T17:00:00Z",
+      "title": "Lanyu updates delivery schedule",
+      "body": "Lanyu says a key grid connection will be delayed by six months. Ten percent of scheduled deliveries move into next year; customer deposits remain refundable. The backlog still exists but the near-term conversion assumption is weaker. Net cash remains positive.",
+      "terms": [
+        "Lanyu",
+        "power",
+        "backlog",
+        "delay",
+        "risk"
+      ],
+      "authority": true
+    },
+    {
+      "id": "storage",
+      "source": "issuer",
+      "event_id": "storage-results",
+      "available_at": "2026-06-03T18:00:00Z",
+      "published_at": "2026-06-03T17:00:00Z",
+      "title": "Harbor publishes storage results",
+      "body": "Harbor Storage reports revenue growth of 12 percent and positive free cash flow. New battery orders target data center backup power. Warranty claims are rising and margins could compress. Cash exceeds debt; valuation and durability still need research.",
+      "terms": [
+        "Harbor",
+        "storage",
+        "datacenter",
+        "earnings",
+        "risk"
+      ],
+      "authority": true
+    },
+    {
+      "id": "warranty",
+      "source": "customer_report",
+      "event_id": "storage-warranty",
+      "available_at": "2026-06-04T18:00:00Z",
+      "published_at": "2026-06-04T17:00:00Z",
+      "title": "Storage customer reports warranty concerns",
+      "body": "One Harbor customer reports battery replacements earlier than expected. This is a single account with no verified fleet-wide failure rate. It is counterevidence to a frictionless margin expansion thesis.",
+      "terms": [
+        "Harbor",
+        "storage",
+        "warranty",
+        "margin",
+        "risk"
+      ],
+      "authority": false
+    }
+  ]
+}

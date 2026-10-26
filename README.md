@@ -1,18 +1,18 @@
 # AI Attention Proxy: Financial Decision RL Environment
 
-Train and evaluate an agent's ability to discover financial research questions,
-inspect evidence, revise a thesis and commit forecasts before outcomes arrive.
-The task is long-term judgment over an evolving information stream, with the
-original source and decision path available for inspection.
+Train and evaluate the full process from incoming information to financial
+research, evidence gathering, judgment, paper position changes and later
+portfolio returns. The original Fast/Mid/Strong workflow continues while
+positions are held, with sources and decisions available for inspection.
 
-The [financial decision environment](environments/financial_decision/README.md)
-provides an offline `reset`/`step` interface, read/judge/forecast/wait actions,
-time-gated evidence, preserved thesis history, delayed forecast rewards and an
-optional Gymnasium adapter. Run the free synthetic example:
+The [research-to-portfolio environment](environments/research_portfolio/README.md)
+provides an offline `reset`/`step` interface, active research tools, versioned
+judgments, next-open paper fills, a cash/position ledger and terminal net-return
+reward. Run the free synthetic example:
 
 ```bash
 python -m pip install -e .
-python -m environments.financial_decision demo --output /tmp/attention-rl-demo --seed 7
+python -m environments.research_portfolio demo --output /tmp/attention-rl-demo
 ```
 
 The demo uses fictional data and a hand-written policy. It demonstrates episode
@@ -25,10 +25,15 @@ The environment builds on Attention Proxy's
 - **Fast:** allocate attention to potentially useful originals.
 - **Mid:** accumulate facts, source relationships and unresolved questions.
 - **Strong:** maintain a judgment, preserve counterevidence and decide whether a
-  testable forecast is warranted.
+  researched judgment warrants a position change.
 
 Entities emerge from the configured topics. Research, abstention and waiting are
 valid actions; there is no required portfolio or trade.
+
+The earlier [forecast environment](environments/financial_decision/README.md)
+retains its time-gated forecasts, frozen scoring contract and optional Gymnasium
+adapter. Its prediction scores and the portfolio environment's returns are
+separate evaluation contracts.
 
 ## Production pipeline
 
