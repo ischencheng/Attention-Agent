@@ -278,6 +278,24 @@ class FinancialEnvironmentTests(unittest.TestCase):
         self.assertFalse(final[4].get("rejection"), final[4])
         self.assertEqual(len(final[0]["thesis_history"]), 3)
 
+    def test_summary_reports_forecast_coverage_without_exposing_future_questions(self):
+        initial = self.env.summary()
+        self.assertEqual(initial["released_questions"], 1)
+        self.assertEqual(initial["unforecasted_released_questions"], 1)
+        self.assertEqual(initial["forecast_coverage_among_released"], 0)
+        self.prepare_thesis()
+        self.forecast()
+        after = self.env.summary()
+        self.assertEqual(after["unforecasted_released_questions"], 0)
+        self.assertEqual(after["forecast_coverage_among_released"], 1)
+        manifest = copy.deepcopy(self.manifest)
+        manifest["questions"][0]["available_at"] = TIMES[1]
+        manifest["questions"][0]["deadline"] = TIMES[2]
+        unreleased = FinancialDecisionEnv(manifest)
+        unreleased.reset()
+        self.assertEqual(unreleased.summary()["released_questions"], 0)
+        self.assertIsNone(unreleased.summary()["forecast_coverage_among_released"])
+
     def test_duplicate_question_cannot_earn_reward_under_another_thesis_id(self):
         self.prepare_thesis()
         first = self.forecast()

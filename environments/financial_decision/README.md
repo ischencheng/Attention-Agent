@@ -137,7 +137,9 @@ Submitting a thesis, choosing a stance, abstaining and waiting earn no positive
 reward. Repeating a forecast through another thesis does not earn another reward.
 Future outcomes remain pending; unavailable outcomes remain unresolved and have
 no predictive score. Coverage, forecasts submitted, resolutions and research costs
-must accompany total reward. A selective high score is not broad forecast skill.
+accompany total reward in the summary. `forecast_coverage_among_released` uses
+questions released by the current cutoff as its denominator, including questions
+whose deadlines have passed. A selective high score is not broad forecast skill.
 
 Natural language reasoning quality is not reduced to a schema reward. The
 validator checks source and memory constraints; it cannot establish whether an

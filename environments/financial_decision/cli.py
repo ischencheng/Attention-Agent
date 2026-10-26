@@ -26,6 +26,8 @@ def _read_actions(path):
         action = json.loads(line, parse_constant=reject_constant)
         if not isinstance(action, dict):
             raise ValueError(f"Action at line {number} must be a JSON object")
+        # Numeric exponents can overflow even when parse_constant is strict.
+        json.dumps(action, allow_nan=False)
         actions.append(action)
     return actions
 
@@ -54,6 +56,8 @@ def run_episode(scenario, output, *, actions=None, seed=0, max_steps=128):
                 if terminated or truncated:
                     break
                 action = demo_action(deepcopy(observation))
+            # Direct Python callers must also leave a serializable audit trail.
+            json.dumps(action, allow_nan=False)
             before = deepcopy(observation)
             observation, reward, terminated, truncated, info = env.step(action)
             step += 1

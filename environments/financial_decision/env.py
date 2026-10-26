@@ -322,8 +322,12 @@ class FinancialDecisionEnv:
                                 "thesis_id": forecast["thesis_id"], "status": "unresolved" if due else "pending", "value": None,
                                 "reason": "resolution evidence is not available at the current cutoff" if due
                                 else "the public resolution time has not arrived"})
+        released = sum(utc_time(q["available_at"]) <= self._now for q in self._questions.values())
         return deepcopy({"episode_id": self._manifest["episode_id"], "current_time": self._time,
                          "steps": self._steps, "forecasts": len(self._forecasts),
+                         "released_questions": released,
+                         "unforecasted_released_questions": released - len(self._forecasts),
+                         "forecast_coverage_among_released": len(self._forecasts) / released if released else None,
                          "resolved_forecasts": sum(r["status"] == "resolved" for r in results),
                          "unresolved_forecasts": sum(r["status"] == "unresolved" for r in results),
                          "pending_forecasts": sum(r["status"] == "pending" for r in results),

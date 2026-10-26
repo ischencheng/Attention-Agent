@@ -94,10 +94,22 @@ class CliTests(unittest.TestCase):
 
     def test_jsonl_rejects_nonfinite_numbers_and_nonobjects(self):
         path = self.root / "actions.jsonl"
-        for text in ('{"type":"forecast","probability":NaN}\n', '[]\n'):
+        for text in ('{"type":"forecast","probability":NaN}\n',
+                     '{"type":"forecast","probability":1e309}\n',
+                     '{"type":"judge","judgment":{"nested":[-1e309]}}\n', '[]\n'):
             path.write_text(text)
             with self.assertRaises(ValueError):
                 _read_actions(path)
+
+    def test_nonfinite_python_action_preserves_complete_failure_artifacts(self):
+        output = self.root / "overflow"
+        with self.assertRaisesRegex(ValueError, "partial episode artifacts"):
+            run_episode(FIXTURE, output, actions=[{"type": "forecast", "probability": float("inf")}])
+        summary = json.loads((output / "summary.json").read_text())
+        self.assertEqual(summary["status"], "error")
+        self.assertEqual(summary["steps"], 0)
+        self.assertEqual(set(summary["artifacts"].values()), {p.name for p in output.iterdir()})
+        self.assertIn("error", (output / "trace.html").read_text())
 
     def test_stdio_requires_reset_and_returns_public_step_results(self):
         requests = [
