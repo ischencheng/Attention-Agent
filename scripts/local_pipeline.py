@@ -31,6 +31,7 @@ import psycopg2
 from dotenv import load_dotenv
 
 RUNTIME = ROOT / "environments/attention_judgment/runs/local-pipeline"
+RESEARCH_SOURCE_STORE = ROOT / "environments/attention_judgment/runs/research-sources"
 PYTHON = ROOT / ".venv/bin/python"
 CODEX = ROOT / "environments/attention_judgment/runs/runtime/node_modules/.bin/codex"
 SERVICES = ["kafka1", "kafka2", "kafka3", "postgres", "otel-collector", "jaeger",
@@ -281,12 +282,16 @@ def _cycle_locked(role, force, previous, status_path, attempt):
         # bypass exception cleanup after next_review_at has already moved.
         # Keep every successful acknowledgment unchanged until verification.
         save(status_path, {**previous, "pending_thesis_reviews": due})
+    # Source requests archive receipts outside the role workspace. Grant only
+    # that store; the pipeline checkout and other runtime data remain excluded.
+    RESEARCH_SOURCE_STORE.mkdir(parents=True, exist_ok=True)
     started = datetime.now(timezone.utc)
     result = run(prompt, CYCLE_SCHEMA, workspace, output,
                  float(os.environ.get("CODEX_TIMEOUT_SECONDS", "900")),
                  model,
                  codex_bin=os.environ.get("CODEX_BIN", str(CODEX)), network_access=True,
-                 environment_profile="research")
+                 environment_profile="research",
+                 additional_writable_dirs=[RESEARCH_SOURCE_STORE.resolve()])
     row = read_agent_state(state_id)
     final = result["final"]
     state_saved = bool(row and row[1] >= started and final["state_saved"])

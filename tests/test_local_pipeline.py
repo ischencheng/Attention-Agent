@@ -57,6 +57,8 @@ class SchedulerTests(unittest.TestCase):
         self.runtime = Path(self.directory.name)
         self.runtime_patch = patch.object(supervisor, "RUNTIME", self.runtime)
         self.runtime_patch.start()
+        self.store_patch = patch.object(supervisor, "RESEARCH_SOURCE_STORE", self.runtime / "research-sources")
+        self.store_patch.start()
         self.versions = {str(index): f"v{index}" for index in range(1, 46)}
         self.signature_patch = patch.object(supervisor, "signature", side_effect=lambda _role: dict(self.versions))
         self.signature_patch.start()
@@ -71,6 +73,7 @@ class SchedulerTests(unittest.TestCase):
         self.connection_patch.stop()
         self.signature_patch.stop()
         self.runtime_patch.stop()
+        self.store_patch.stop()
         self.directory.cleanup()
 
     def status(self, role="mid"):
@@ -89,6 +92,16 @@ class SchedulerTests(unittest.TestCase):
                 started = next(event for event in events if event["event"] == "started")
                 self.assertEqual(started["model"], expected)
                 self.assertEqual(started["environment_profile"], "research")
+
+    def test_research_cycles_grant_only_the_canonical_receipt_store(self):
+        for role in ("mid", "strong"):
+            with self.subTest(role=role):
+                supervisor.cycle(role)
+                paths = self.run.call_args.kwargs["additional_writable_dirs"]
+                self.assertEqual(paths, [supervisor.RESEARCH_SOURCE_STORE.resolve()])
+                self.assertTrue(paths[0].is_dir())
+                self.assertNotEqual(paths[0], supervisor.ROOT)
+                self.assertNotEqual(paths[0], self.runtime)
 
     def test_blank_role_model_uses_generic_fallback(self):
         with patch.dict(os.environ, {"MID_CODEX_MODEL": "", "CODEX_MODEL": "fallback-model"}):

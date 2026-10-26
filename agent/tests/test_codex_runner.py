@@ -111,6 +111,49 @@ class RunnerTests(unittest.TestCase):
         self.assertIn("sandbox_workspace_write.network_access=true", observed["args"])
         self.assertIn("workspace-write", observed["args"])
 
+    def test_research_receipt_directory_is_an_explicit_narrow_write_grant(self):
+        store = self.root / "receipts"
+        store.mkdir()
+        self.invoke(environment_profile="research", additional_writable_dirs=[store])
+        observed = json.loads((self.root / "run/observed.json").read_text())
+        args = observed["args"]
+        self.assertEqual(args.count("--add-dir"), 1)
+        self.assertEqual(args[args.index("--add-dir") + 1], str(store.resolve()))
+        report = json.loads((self.root / "run/run.json").read_text())
+        self.assertEqual(report["additional_writable_dirs"], [str(store.resolve())])
+        self.assertFalse(report["network_access"])
+        self.assertNotIn("sandbox_workspace_write.network_access=true", args)
+
+    def test_research_profile_alone_does_not_grant_extra_writes(self):
+        self.invoke(environment_profile="research")
+        observed = json.loads((self.root / "run/observed.json").read_text())
+        self.assertNotIn("--add-dir", observed["args"])
+        self.assertEqual(json.loads((self.root / "run/run.json").read_text())["additional_writable_dirs"], [])
+
+    def test_extra_write_grants_cannot_widen_model_or_read_only_calls(self):
+        for options in ({}, {"sandbox": "read-only"},
+                        {"sandbox": "read-only", "disable_tools": True},
+                        {"environment_profile": "research", "sandbox": "read-only"}):
+            with self.subTest(options=options), patch.object(runner.subprocess, "run") as version, \
+                    patch.object(runner.subprocess, "Popen") as execute:
+                with self.assertRaisesRegex(ValueError, "additional_writable_dirs"):
+                    self.invoke(additional_writable_dirs=[self.root], **options)
+                version.assert_not_called()
+                execute.assert_not_called()
+                self.assertFalse((self.root / "run").exists())
+
+    def test_extra_write_grants_require_existing_directories(self):
+        file_path = self.root / "regular-file"
+        file_path.write_text("fixture")
+        for paths in ([self.root / "missing"], [file_path], str(self.root), [None]):
+            with self.subTest(paths=paths), patch.object(runner.subprocess, "run") as version, \
+                    patch.object(runner.subprocess, "Popen") as execute:
+                with self.assertRaisesRegex(ValueError, "additional_writable_dirs"):
+                    self.invoke(environment_profile="research", additional_writable_dirs=paths)
+                version.assert_not_called()
+                execute.assert_not_called()
+                self.assertFalse((self.root / "run").exists())
+
     def test_environment_profiles_restrict_real_child_and_version_processes(self):
         common = {
             "PATH": os.defpath, "HOME": "/offline-test-home", "LANG": "C.UTF-8",

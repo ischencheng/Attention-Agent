@@ -109,7 +109,7 @@ def _stop_process(process):
 
 def run(prompt, schema, cwd, output_dir, timeout, model=None, *,
         codex_bin="codex", sandbox="workspace-write", network_access=False, disable_tools=False,
-        model_instructions=None, environment_profile="model"):
+        model_instructions=None, environment_profile="model", additional_writable_dirs=()):
     """Return final JSON, JSONL events, and reported usage, or raise CodexRunError.
 
     ``schema`` is a JSON Schema object, not a file path. ``output_dir`` must be
@@ -119,6 +119,9 @@ def run(prompt, schema, cwd, output_dir, timeout, model=None, *,
     Authentication is provided by the caller's Codex setup or CODEX_API_KEY;
     this function never reads, copies, or logs credential files.
     The research profile additionally admits settings consumed by project tools.
+    A trusted research caller may explicitly grant existing absolute directories
+    alongside its workspace. No extra directory is granted by the profile alone;
+    model-only and read-only invocations cannot request additional writes.
     Neither profile restricts accessible files, allowed endpoints or tool actions.
     """
     if not isinstance(prompt, str) or not prompt.strip():
@@ -138,6 +141,23 @@ def run(prompt, schema, cwd, output_dir, timeout, model=None, *,
     if network_access and sandbox != "workspace-write":
         raise ValueError("network_access requires workspace-write sandbox configuration")
     env = child_environment(environment_profile)
+    if not isinstance(additional_writable_dirs, (list, tuple)):
+        raise ValueError("additional_writable_dirs must be a list or tuple of existing absolute directories")
+    if additional_writable_dirs and (environment_profile != "research" or sandbox != "workspace-write"):
+        raise ValueError("additional_writable_dirs requires the research profile and workspace-write sandbox")
+    writable_dirs = []
+    for value in additional_writable_dirs:
+        try:
+            directory = Path(value)
+            if not directory.is_absolute():
+                raise ValueError("relative directory")
+            directory = directory.resolve(strict=True)
+            if not directory.is_dir():
+                raise ValueError("not a directory")
+        except (TypeError, ValueError, OSError) as exc:
+            raise ValueError("additional_writable_dirs must contain existing absolute directories") from exc
+        if str(directory) not in writable_dirs:
+            writable_dirs.append(str(directory))
     validator_type = validator_for(schema)
     validator_type.check_schema(schema)
     validator = validator_type(schema)
@@ -162,6 +182,8 @@ def run(prompt, schema, cwd, output_dir, timeout, model=None, *,
         command += ["--model", str(model)]
     if network_access:
         command += ["-c", "sandbox_workspace_write.network_access=true"]
+    for directory in writable_dirs:
+        command += ["--add-dir", directory]
     if disable_tools:
         # Names verified with codex-cli 0.163.0 `features list` and its config source.
         # Read-only remains the boundary for any built-ins without an off switch;
@@ -188,6 +210,7 @@ def run(prompt, schema, cwd, output_dir, timeout, model=None, *,
         "model": model, "timeout_seconds": timeout, "sandbox": sandbox,
         "network_access": bool(network_access), "disable_tools": bool(disable_tools),
         "environment_profile": environment_profile, "environment_names": sorted(env),
+        "additional_writable_dirs": writable_dirs,
         "custom_model_instructions": model_instructions is not None, "success": False,
         "returncode": None, "usage": None, "cli_version": None,
     }
