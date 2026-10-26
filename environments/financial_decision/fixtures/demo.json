@@ -1,0 +1,182 @@
+{
+  "schema_version": 1,
+  "episode_id": "synthetic-lanyu-expansion-v1",
+  "mode": "synthetic",
+  "timeline": [
+    "2025-06-02T18:00:00Z",
+    "2025-06-03T18:00:00Z",
+    "2025-06-04T18:00:00Z",
+    "2025-06-05T18:00:00Z",
+    "2025-06-09T18:00:00Z",
+    "2025-06-10T18:00:00Z"
+  ],
+  "observations": [
+    {
+      "id": "14b12712c168f026181eefc687bf4ce557aec638069f0d2488bcff6249eeb9e0",
+      "source": "fictional-company-official",
+      "source_id": "synthetic://lanyu-expansion-v1/capacity-contract",
+      "published_at": "2025-06-02T12:00:00Z",
+      "available_at": "2025-06-02T12:05:00Z",
+      "event_id": "lanyu-expansion:capacity-contract",
+      "raw": {
+        "synthetic": true,
+        "company": "Lanyu Packaging Lab",
+        "listed": false,
+        "title": "Capacity expansion and minimum purchase commitment",
+        "text": "The fictional company plans to increase advanced packaging capacity from 100,000 to 180,000 units. Its datacenter customer signs a two-year minimum purchase commitment covering 70% of incremental capacity. Customer acceptance remains a condition. Contract prices, cancellation terms, financing and unit margins are not disclosed. This is the company claim, not independently verified operating performance.",
+        "event_type": "initial"
+      },
+      "raw_sha256": "2f302ca262ce24e15926dd2b097602510dfe191d10ad29754147b01ac79270be"
+    },
+    {
+      "id": "2d6e987c080e77f368a5f2fad7110517be3c524baf827979b197e1a6f599eee2",
+      "source": "fictional-syndicated-news",
+      "source_id": "synthetic://lanyu-expansion-v1/syndicated-story",
+      "published_at": "2025-06-03T12:00:00Z",
+      "available_at": "2025-06-03T12:02:00Z",
+      "event_id": "lanyu-expansion:capacity-contract",
+      "raw": {
+        "synthetic": true,
+        "company": "Lanyu Packaging Lab",
+        "listed": false,
+        "title": "Another headline repeats the capacity announcement",
+        "text": "This article repeats the June 2 company announcement: planned capacity of 180,000 units and 70% customer commitment. It supplies no interview, new operating facts or independent verification.",
+        "event_type": "syndication"
+      },
+      "raw_sha256": "e22a37c14b5a8e531537b29756430fbbb7f3d14cc09f8537e2e25944e0dba75e"
+    },
+    {
+      "id": "e0e767d340f03b59c204dbe6b60f51d4fc2e7942f5f8f15d731c86bb4aeb744c",
+      "source": "fictional-company-official",
+      "source_id": "synthetic://lanyu-expansion-v1/contract-cancelled",
+      "published_at": "2025-06-04T12:00:00Z",
+      "available_at": "2025-06-04T12:03:00Z",
+      "event_id": "lanyu-expansion:contract-cancelled",
+      "raw": {
+        "synthetic": true,
+        "company": "Lanyu Packaging Lab",
+        "listed": false,
+        "title": "Company reports permanent cancellation",
+        "text": "The company says its customer permanently cancelled the minimum purchase contract. Sixty percent of planned expansion capex is already committed and no replacement customer is secured. Customer acceptance and compensation remain unknown.",
+        "event_type": "cancellation"
+      },
+      "raw_sha256": "27d45f8432ce74bf799d871eee61e3bab6940f74f2c49d7428b774b7949459cc"
+    },
+    {
+      "id": "7e6fad035b80688e22869ef35c6b8e8eb139f3c94e567aa1a5b4fd77aaf827d2",
+      "source": "fictional-company-official",
+      "source_id": "synthetic://lanyu-expansion-v1/contract-correction",
+      "published_at": "2025-06-05T12:00:00Z",
+      "available_at": "2025-06-05T12:04:00Z",
+      "event_id": "lanyu-expansion:contract-correction",
+      "raw": {
+        "synthetic": true,
+        "company": "Lanyu Packaging Lab",
+        "listed": false,
+        "title": "Correction: delayed acceptance, contract still valid",
+        "text": "The company corrects its June 4 announcement: temporary acceptance delay was incorrectly described as permanent cancellation. A signed joint correction says the two-year minimum purchase contract remains valid, with 70% coverage, but acceptance is delayed. No new advance payment has been received. Committed capex and uncertain cash recovery remain risks. Preserve the earlier contradictory announcement and the correction together.",
+        "event_type": "correction"
+      },
+      "raw_sha256": "a524f76529836263fbfb72a3aa228f51ab4f0c73fd6ca10740266b0e98670662"
+    },
+    {
+      "id": "a85b9cf020feb0ee4503cf835fdde9855d5b5ff861d67a72d696a25a36e26bad",
+      "source": "fictional-company-official",
+      "source_id": "synthetic://lanyu-expansion-v1/financing-detail",
+      "published_at": "2025-06-04T11:00:00Z",
+      "available_at": "2025-06-09T11:00:00Z",
+      "event_id": "lanyu-expansion:financing-detail",
+      "raw": {
+        "synthetic": true,
+        "company": "Lanyu Packaging Lab",
+        "listed": false,
+        "title": "Late-arriving financing detail",
+        "text": "A financing note published June 4 only reaches the archive on June 9. The expansion relies on floating-rate debt and the issuer has not disclosed net margin or customer cash collection. It was unavailable at the earlier evidence cutoffs.",
+        "event_type": "financing"
+      },
+      "raw_sha256": "4cc856de2d9a96a8e780a62369db599017a41f64feb04fca4ddc4831fb567317"
+    },
+    {
+      "id": "a6b058e491f0db2693186a8fbf953af90ff14f50fb4083c056337e89e36f1af6",
+      "source": "fictional-company-official",
+      "source_id": "synthetic://lanyu-expansion-v1/signed-acceptance",
+      "published_at": "2025-06-09T12:00:00Z",
+      "available_at": "2025-06-09T12:03:00Z",
+      "event_id": "lanyu-expansion:signed-acceptance",
+      "raw": {
+        "synthetic": true,
+        "company": "Lanyu Packaging Lab",
+        "listed": false,
+        "title": "Customer acceptance certificate",
+        "text": "A signed certificate records the customer accepting the new packaging line on June 9. This establishes the acceptance milestone within this fictional scenario. It does not establish realized margin, cash collections, a market return or long-term business quality.",
+        "event_type": "acceptance"
+      },
+      "raw_sha256": "542fa4ebc999a237c59f3e233217de6e46d27a89176de2db0b820f30bc727caf"
+    },
+    {
+      "id": "688690c7170387a7e571eb54d7080511d26f0328be350a45bf204444333eefa8",
+      "source": "fictional-company-official",
+      "source_id": "synthetic://lanyu-expansion-v1/margin-undisclosed",
+      "published_at": "2025-06-10T12:00:00Z",
+      "available_at": "2025-06-10T12:05:00Z",
+      "event_id": "lanyu-expansion:margin-undisclosed",
+      "raw": {
+        "synthetic": true,
+        "company": "Lanyu Packaging Lab",
+        "listed": false,
+        "title": "Operating update omits gross margin",
+        "text": "The issuer publishes shipment counts but no gross-margin figure or independently auditable cost data for the new line. Whether gross margin reaches 30% cannot be resolved from the available record. Missing disclosure is not evidence that the threshold failed.",
+        "event_type": "missing-disclosure"
+      },
+      "raw_sha256": "b53e5fd6a6d47b67e51240906a43c85cfc18ce65b0a1f5bcdd3b1987bd1d3c91"
+    }
+  ],
+  "questions": [
+    {
+      "question_id": "customer-acceptance-june9",
+      "title": "Will the customer accept the line by June 9?",
+      "criterion": {
+        "metric": "customer_acceptance",
+        "operator": "==",
+        "target": "accepted by 2025-06-09",
+        "unit": "milestone",
+        "source": "signed customer acceptance certificate"
+      },
+      "available_at": "2025-06-02T18:00:00Z",
+      "deadline": "2025-06-03T18:00:00Z",
+      "resolve_at": "2025-06-09T18:00:00Z",
+      "resolution": {
+        "status": "resolved",
+        "value": 1,
+        "available_at": "2025-06-09T18:00:00Z",
+        "evidence_ids": [
+          "a6b058e491f0db2693186a8fbf953af90ff14f50fb4083c056337e89e36f1af6"
+        ],
+        "reason": "The fictional signed acceptance certificate establishes completion by the registered date."
+      }
+    },
+    {
+      "question_id": "gross-margin-june10",
+      "title": "Does the new line achieve at least 30% gross margin by June 10?",
+      "criterion": {
+        "metric": "gross_margin",
+        "operator": ">=",
+        "target": 30,
+        "unit": "percent",
+        "source": "issuer operating disclosure and auditable cost data"
+      },
+      "available_at": "2025-06-02T18:00:00Z",
+      "deadline": "2025-06-03T18:00:00Z",
+      "resolve_at": "2025-06-10T18:00:00Z",
+      "resolution": {
+        "status": "unresolved",
+        "value": null,
+        "available_at": "2025-06-10T18:00:00Z",
+        "evidence_ids": [
+          "688690c7170387a7e571eb54d7080511d26f0328be350a45bf204444333eefa8"
+        ],
+        "reason": "The operating update omits margin and costs, so the criterion is unverifiable. No outcome or score is imputed."
+      }
+    }
+  ]
+}
