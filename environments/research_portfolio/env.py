@@ -104,6 +104,24 @@ class ResearchPortfolioEnv:
         result = self.market.snapshot()
         return {key: value for key, value in result.items() if key != "bars"}
 
+    def _execution_contract(self):
+        """Publish frozen account rules without revealing the market dataset."""
+        return {
+            **self.manifest["portfolio"],
+            "account_type": "cash",
+            "long_only": True,
+            "leverage_allowed": False,
+            "fractional_shares": True,
+            "price_basis": self.manifest["price_basis"],
+            "allocation": "Complete target weights in pre-trade NAV; total weight at most 1. Omitted assets target zero and remaining weight stays cash.",
+            "concentration_limit": "max_weight limits each requested target weight; price drift does not trigger automatic rebalancing.",
+            "execution_time": "First eligible shared market open strictly after submission, within the fixed episode horizon.",
+            "execution_price": "Raw open adjusted by slippage_bps: higher for buys, lower for sells. fee_bps is charged on executed notional.",
+            "cash_constraints": "Sell before buying; scale buys to available cash including fees. Risk reductions cap shares at existing holdings when positive investment gates fail.",
+            "pending_orders": "One pending complete allocation; replace or cancel explicitly.",
+            "terminal_valuation": "Mark existing holdings at the terminal raw close; include cash and dividend receivables. No assumed liquidation fill.",
+        }
+
     def observation(self):
         visible = self._visible_sources()
         handled = {ticket for theme in self.themes.values() for ticket in theme["ticket_ids"]}
@@ -117,7 +135,8 @@ class ResearchPortfolioEnv:
             "tickets": list(self.tickets.values()), "themes": list(self.themes.values()),
             "questions": list(self.questions.values()), "theses": self.theses,
             "discovered_assets": list(self.discovered_assets.values()), "tool_results": self.tool_results,
-            "account": self._account(), "budget": {"steps_used": self.steps, "max_steps": self.max_steps,
+            "account": self._account(), "execution_contract": self._execution_contract(),
+            "budget": {"steps_used": self.steps, "max_steps": self.max_steps,
                 "cutoff_actions_used": self.cutoff_steps, "actions_per_cutoff": self.actions_per_cutoff},
             "action_contract": ACTION_CONTRACT})
 

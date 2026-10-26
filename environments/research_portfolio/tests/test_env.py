@@ -107,6 +107,42 @@ class ResearchPortfolioTests(unittest.TestCase):
         obs["feed"][0]["id"] = "mutated"
         self.assertEqual(self.env.observation()["feed"][0]["id"], "earnings")
 
+    def test_public_execution_contract_distinguishes_and_enforces_limits(self):
+        manifest = fixture()
+        manifest["portfolio"].update(initial_cash=1234, fee_bps=7, slippage_bps=13, max_weight=0.2)
+        limited = ResearchPortfolioEnv(manifest)
+        manifest["portfolio"]["max_weight"] = 1
+        unrestricted = ResearchPortfolioEnv(manifest)
+        narrow = limited.observation()
+        broad = unrestricted.observation()
+        expected = {"initial_cash": 1234, "fee_bps": 7, "slippage_bps": 13, "max_weight": 0.2,
+                    "account_type": "cash", "long_only": True, "leverage_allowed": False,
+                    "fractional_shares": True, "price_basis": "raw"}
+        contract = narrow["execution_contract"]
+        self.assertEqual({key: contract[key] for key in expected}, expected)
+        self.assertEqual(broad["execution_contract"]["max_weight"], 1)
+        self.assertNotEqual(narrow, broad)
+        self.assertEqual({key: value for key, value in narrow.items() if key != "execution_contract"},
+                         {key: value for key, value in broad.items() if key != "execution_contract"})
+        self.assertNotIn("assets", contract)
+        self.assertNotIn("bars", contract)
+        self.assertNotIn("PWRX", json.dumps(contract))
+        self.assertNotIn("FUTURE_EVIDENCE_CANARY", json.dumps(narrow))
+        contract["max_weight"] = 1
+        self.assertEqual(limited.observation()["execution_contract"]["max_weight"], 0.2)
+        self.prepare_investment(limited)
+        self.prepare_investment(unrestricted)
+        allocation = action("allocate", target_weights={"power": 0.3}, thesis_ids=["power-thesis"],
+                            reason="Check the public requested-weight limit.")
+        before = limited.observation()["account"]
+        rejected = limited.step(allocation)
+        self.assertIn("concentration limit", rejected[4]["rejection"])
+        self.assertEqual(rejected[0]["account"], before)
+        self.ok(allocation, unrestricted)
+        allocation["target_weights"]["power"] = 0.2
+        accepted = self.ok(allocation, limited)
+        self.assertEqual(accepted[0]["account"]["pending_order"]["weights"], {"power": 0.2})
+
     def test_native_publication_and_receipt_both_gate_visibility(self):
         manifest = fixture()
         manifest["sources"][0]["published_at"] = TIMES[1]
