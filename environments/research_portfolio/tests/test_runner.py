@@ -83,6 +83,25 @@ class RunnerTests(unittest.TestCase):
             run_episode(FIXTURE, out, actions=demo_actions())
         self.assertEqual((out / "keep").read_text(), "prior run")
 
+    def test_explicit_relative_codex_path_survives_isolated_working_directory(self):
+        observed = {}
+        def fake(*args, **kwargs):
+            observed.update(kwargs)
+            return {"events": [], "final": {"actions_json": '[{"type":"stop","role":"strong","reason":"done"}]'}}
+        policy = CodexPolicy(self.root, runner=fake, codex_bin="runtime/bin/codex")
+        policy.choose({"suggested_role": "strong", "as_of": "2026-06-01T20:00:00Z"})
+        self.assertEqual(observed["codex_bin"], str(Path("runtime/bin/codex").resolve()))
+
+    def test_rejection_only_rollout_is_distinct_from_a_cash_decision(self):
+        def fake(*args, **kwargs):
+            return {"events": [], "final": {"actions_json": '[{"role":"fast","triage":{"source_id":"capex"}}]'}}
+        summary = run_episode(FIXTURE, self.root / "rejections", codex=True,
+                              policy_runner=fake, max_calls=2)
+        self.assertEqual(summary["policy_outcome"], "rejected_actions_only")
+        self.assertEqual(summary["rejected_actions"], 2)
+        self.assertTrue(summary["policy_budget_exhausted"])
+        self.assertEqual(summary["reward"], 0)  # The frozen accounting reward is unchanged.
+
     def test_nonfinite_or_nonobject_transcripts_fail_before_execution(self):
         for actions in ([None], [{"role": "strong", "type": "stop", "reason": float("nan")}],
                         [{"role": "strong", "type": "stop", "reason": "done"}, None]):
