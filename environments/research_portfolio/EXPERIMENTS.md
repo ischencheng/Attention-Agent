@@ -11,6 +11,19 @@ record derived from the saved summaries, invocation records, trajectories,
 archive contract and account reconciliation. Original source bodies, production
 record identifiers and raw model traces remain local.
 
+## Remote GPU attempt
+
+The next run uses `Qwen/Qwen3-14B` at revision
+`40c069824f4251a91eefaf281ebe4c544efd3e18` on **one NVIDIA L40S**. The worker
+initialized and verified its model files; recorded packages are vLLM 0.32.0,
+PyTorch 2.13.0+cu130, Transformers 5.19.0 and huggingface-hub 2.2.0. The source
+episode and financial contract are unchanged, with a new archive manifest for
+this model identity. The first GPU transport smoke failed before generating
+tokens: the installed tokenizer returned a `BatchEncoding` where the adapter
+expected a token list. The adapter now explicitly requests and validates an
+integer token list. Generation and episode results are pending verification;
+worker readiness alone is not a completed model experiment.
+
 ## Local development history
 
 | Attempt | Execution outcome | Research and trading | Account outcome |

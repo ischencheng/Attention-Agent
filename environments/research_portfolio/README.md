@@ -193,13 +193,20 @@ repeatable-read transaction; it does not change offsets or application state.
 It retains original envelopes and raw payloads, including duplicate versions.
 Availability is the actual database receipt, never a backdated publication time.
 
+Install the archive extra before collecting prices, building or validating an
+archive, or running the full test suite:
+
+```bash
+python -m pip install -e '.[archive]'
+```
+
 ```bash
 python -m environments.research_portfolio.collector export-db \
   --start 2026-10-22T00:00:00Z --end 2026-10-26T20:00:00Z \
   --output /tmp/sources.json
 python -m environments.research_portfolio.collector prices \
   --assets /path/to/catalog.json \
-  --start 2026-10-19T00:00:00Z --end 2026-10-26T20:00:00Z \
+  --start 2026-10-19 --end 2026-10-26 \
   --output /tmp/market.json
 ```
 
@@ -212,7 +219,10 @@ The asset file is an array of records with `asset_id`, `symbol`, `name`,
 `available_at` and `terms`, matching the scenario catalog. It declares supported
 data coverage, not required holdings. Preserve the source of the catalog and
 its selection rule. The current price adapter supports US daily raw opens and
-closes from Yahoo Finance with an XNYS session calendar. Unsupported corporate
+closes from Yahoo Finance. Admission checks each session's open and close against
+the XNYS calendar in `exchange-calendars==4.13.2`, including holidays and early
+closes. This binds timestamps independently of provider prices; it does not
+certify their historical vintage. Unsupported corporate
 actions or dividends without an explicit payment date fail admission.
 
 An episode specification is a JSON object with `episode_id`, `start_at`, `end_at`,
@@ -245,7 +255,7 @@ Use an authenticated Modal environment with SDK 1.5.5. Install the repository
 package in that interpreter; it supplies the JSON-schema validation dependency:
 
 ```bash
-python -m pip install -e . 'modal==1.5.5'
+python -m pip install -e '.[archive]' 'modal==1.5.5'
 ```
 
 The [GPU policy adapter](modal_policy.py) builds a pinned model image before
@@ -353,5 +363,6 @@ separate restricted policy worker when evaluator state must be inaccessible.
 Run the contract tests with:
 
 ```bash
+python -m pip install -e '.[archive]'
 python -m unittest discover -s environments/research_portfolio/tests -v
 ```

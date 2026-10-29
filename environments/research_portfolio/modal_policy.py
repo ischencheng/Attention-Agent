@@ -94,16 +94,35 @@ def validate_limits(max_input_tokens, max_output_tokens, max_requests):
         raise ValueError("input and output budgets exceed the native context window")
 
 
+def render_tokens(tokenizer, messages, max_input_tokens):
+    # Transformers 5 can default to BatchEncoding. vLLM's TokensPrompt requires
+    # the flat sequence, not iteration over the encoding's dictionary keys.
+    prompt = tokenizer.apply_chat_template(messages, tokenize=True, return_dict=False,
+                                           add_generation_prompt=True, enable_thinking=False)
+    if not isinstance(prompt, list) or not prompt or any(type(item) is not int for item in prompt):
+        raise ValueError("tokenizer did not return a flat integer token sequence")
+    if len(prompt) > max_input_tokens:
+        raise ValueError("model input exceeds the declared budget; truncation is forbidden")
+    return prompt
+
+
 def build_app():
     """Construct SDK objects without creating a deployment or public endpoint."""
     import modal
-    image = (modal.Image.from_registry(f"vllm/vllm-openai:v{VLLM_VERSION}", add_python="3.12")
-             .entrypoint([])
-             .env({"PYTHONPATH": "/usr/local/lib/python3.12/dist-packages:/usr/local/lib/python3.12/site-packages:/root"})
-             .add_local_file(__file__, "/root/environments/research_portfolio/modal_policy.py", copy=True)
-             .run_function(download_model, cpu=4, memory=8192, timeout=1800, include_source=False)
-             .env({"HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1",
-                   "VLLM_NO_USAGE_STATS": "1", "DO_NOT_TRACK": "1"}))
+    cached_image = os.environ.get("ATTENTION_MODAL_MODEL_IMAGE_ID")
+    if cached_image:
+        # Reuse a previously built private image without downloading weights
+        # again. Startup still checks every checkpoint byte against the pin.
+        image = modal.Image.from_id(cached_image)
+    else:
+        image = (modal.Image.from_registry(f"vllm/vllm-openai:v{VLLM_VERSION}", add_python="3.12")
+                 .entrypoint([])
+                 .env({"PYTHONPATH": "/usr/local/lib/python3.12/dist-packages:/usr/local/lib/python3.12/site-packages:/root"})
+                 .add_local_file(__file__, "/root/environments/research_portfolio/modal_policy.py", copy=True)
+                 .run_function(download_model, cpu=4, memory=8192, timeout=1800, include_source=False)
+                 .env({"HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1",
+                       "VLLM_NO_USAGE_STATS": "1", "DO_NOT_TRACK": "1"}))
+    image = image.add_local_file(__file__, "/root/environments/research_portfolio/modal_policy.py", copy=True)
     app = modal.App(APP_NAME)
 
     @app.cls(image=image, gpu="L40S", cpu=4, memory=65536, max_containers=1,
@@ -173,10 +192,7 @@ def build_app():
                     or item["role"] not in {"system", "user", "assistant"}
                     or not isinstance(item["content"], str) for item in messages)):
                 raise ValueError("GPU policy accepts text messages only")
-            prompt = self.tokenizer.apply_chat_template(messages, tokenize=True,
-                                                       add_generation_prompt=True, enable_thinking=False)
-            if len(prompt) > self.input_limit:
-                raise ValueError("model input exceeds the declared budget; truncation is forbidden")
+            prompt = render_tokens(self.tokenizer, messages, self.input_limit)
             sampled = SamplingParams(temperature=0, seed=0, max_tokens=max_output_tokens,
                                      structured_outputs=StructuredOutputsParams(json=schema))
             result = self.llm.generate({"prompt_token_ids": prompt}, sampled, use_tqdm=False)[0]
@@ -252,7 +268,10 @@ def remote_backend(*, max_input_tokens=24000, max_output_tokens=2048, max_reques
     validate_limits(max_input_tokens, max_output_tokens, max_requests)
     app, worker_class = build_app()
     with modal.enable_output(), app.run():
-        worker = worker_class(expires_at=int(time.time()) + MAX_LIFETIME_SECONDS,
+        expires_at = int(os.environ.get("ATTENTION_MODAL_DEADLINE", int(time.time()) + MAX_LIFETIME_SECONDS))
+        if not 0 < expires_at - time.time() <= MAX_LIFETIME_SECONDS:
+            raise ValueError("GPU deadline is expired or exceeds 45 minutes")
+        worker = worker_class(expires_at=expires_at,
                               input_limit=max_input_tokens, output_limit=max_output_tokens,
                               request_limit=max_requests)
         identity = worker.identity.remote()

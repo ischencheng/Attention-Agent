@@ -55,6 +55,22 @@ class ModalPolicyTests(unittest.TestCase):
             with self.subTest(limits=limits), self.assertRaises(ValueError):
                 policy.validate_limits(*limits)
 
+    def test_tokenizer_requests_flat_tokens_and_rejects_encodings_or_truncation(self):
+        calls = []
+        def apply(messages, **options):
+            calls.append(options)
+            return [12, 34, 56]
+        tokenizer = SimpleNamespace(apply_chat_template=apply)
+        self.assertEqual(policy.render_tokens(tokenizer, [], 3), [12, 34, 56])
+        self.assertEqual(calls, [{"tokenize": True, "return_dict": False,
+                                  "add_generation_prompt": True, "enable_thinking": False}])
+        with self.assertRaisesRegex(ValueError, "truncation is forbidden"):
+            policy.render_tokens(tokenizer, [], 2)
+        for result in ({"input_ids": [12, 34]}, [[12, 34]], ["input_ids"], []):
+            tokenizer = SimpleNamespace(apply_chat_template=lambda *args, **kwargs: result)
+            with self.subTest(result=result), self.assertRaisesRegex(ValueError, "flat integer"):
+                policy.render_tokens(tokenizer, [], 4)
+
     def test_wrong_checkpoint_hardware_or_budget_is_rejected_before_calls(self):
         original = identity()
         changes = [("served_model", "other"), ("policy_manifest_sha256", "0" * 64),

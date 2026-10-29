@@ -96,6 +96,12 @@ downloaded after the interval and may include provider revisions. Such an archiv
 can support a disclosed retrospective replay; it does not certify the original
 price vintage available at each historical instant.
 
+Archive admission binds every bar's open and close to the XNYS session calendar
+in `exchange-calendars==4.13.2`. The archive extra is required, and a different
+calendar version or shifted session timestamp fails validation. This checks
+when a price belongs; it does not upgrade reconstructed prices to original
+point-in-time observations.
+
 A checkpoint published before the episode provides a model release boundary.
 It is not a substitute for a documented training-data cutoff. The serving
 adapter verifies the declared weight, tokenizer and template files before
@@ -147,7 +153,8 @@ cases. Relevant examples include:
 - **Research prerequisites:** unread citations, missing research tool results,
   duplicate evidence and unsupported exposure increases must not pass gates.
 - **Time and scheduling:** equal arrival times use a stable order; independent
-  role timers, due reviews and idle periods remain distinct.
+  role timers, due reviews and idle periods remain distinct. Archive price
+  timestamps must match the pinned exchange calendar.
 - **Execution boundaries:** orders use the eligible next open, risk reductions
   cannot become accidental share increases after gaps, and fees/corporate actions
   preserve accounting identities.
@@ -161,6 +168,7 @@ cases. Relevant examples include:
 Run the suite from the repository root:
 
 ```bash
+python -m pip install -e '.[archive]'
 python -m unittest discover -s environments/research_portfolio/tests -v
 ```
 

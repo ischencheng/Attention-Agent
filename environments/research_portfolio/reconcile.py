@@ -10,6 +10,9 @@ import math
 from .scenario import timestamp
 
 
+QUANTITY_TOLERANCE = Decimal("1e-12")
+
+
 def reconcile(manifest, summary):
     number = lambda value: Decimal(str(value))
     initial = number(manifest["portfolio"]["initial_cash"])
@@ -67,7 +70,9 @@ def reconcile(manifest, summary):
                 errors.append("negative cash or shares")
     values = {}
     for asset, quantity in positions.items():
-        if quantity == 0:
+        # Serialized fractional fills can leave Decimal residue after a full
+        # exit. Apply the same share tolerance to valuation and membership.
+        if abs(quantity) <= QUANTITY_TOLERANCE:
             continue
         mark = next(bar["close"] for bar in manifest["bars"]
                     if bar["asset_id"] == asset and timestamp(bar["close_at"]) == terminal)
@@ -75,7 +80,7 @@ def reconcile(manifest, summary):
         actual = summary["account"]["positions"].get(asset, {})
         check("final quantity " + asset, actual.get("quantity", 0), quantity)
         check("final mark " + asset, actual.get("mark_price", 0), mark)
-    expected_assets = {key for key, quantity in positions.items() if abs(quantity) > Decimal("1e-12")}
+    expected_assets = set(values)
     if set(summary["account"]["positions"]) != expected_assets:
         errors.append("final position set differs")
     nav = cash + sum(values.values()) + sum(receivables.values())

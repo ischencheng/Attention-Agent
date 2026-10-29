@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 from copy import deepcopy
 from datetime import datetime, timezone
+from functools import lru_cache
 import hashlib
 import json
 import math
@@ -25,6 +26,7 @@ from .scenario import json_copy, load_manifest, string_list, text, timestamp
 FORMAT = "attention-research-archive-v1"
 ROLES = ("fast", "mid", "strong")
 FILES = ("episode.json", "sources.json", "market.json", "policy-manifest.json")
+CALENDAR_VERSION = "4.13.2"
 
 
 def canonical(value):
@@ -192,6 +194,17 @@ def validate_market(value):
     return bundle
 
 
+@lru_cache(maxsize=16)
+def _session_calendar(first_year, last_year):
+    try:
+        import exchange_calendars
+    except ImportError as exc:
+        raise ValueError("archive calendar validation requires the pinned archive extra: pip install '.[archive]'") from exc
+    if exchange_calendars.__version__ != CALENDAR_VERSION:
+        raise ValueError(f"archive calendar validation requires exchange-calendars=={CALENDAR_VERSION}")
+    return exchange_calendars.get_calendar("XNYS", start=f"{first_year}-01-01", end=f"{last_year}-12-31")
+
+
 def _verify_price_projection(receipt, asset, bars, actions):
     """Bind evaluator prices to the original provider fields, not just new hashes."""
     url = urlparse(receipt["request_url"])
@@ -221,6 +234,17 @@ def _verify_price_projection(receipt, asset, bars, actions):
             raise ValueError("market original contains an invalid timestamp")
         return datetime.fromtimestamp(value, timezone.utc).astimezone(zone).date()
     expected = {timestamp(bar["close_at"]).astimezone(zone).date(): bar for bar in bars}
+    if len(expected) != len(bars):
+        raise ValueError("market session calendar requires one bar per asset session")
+    if receipt.get("calendar") != "XNYS" or receipt.get("calendar_version") != CALENDAR_VERSION:
+        raise ValueError("market receipt must declare the pinned XNYS session calendar")
+    calendar = _session_calendar(min(expected).year, max(expected).year)
+    for session, bar in expected.items():
+        label = session.isoformat()
+        if (not calendar.is_session(label)
+                or timestamp(bar["open_at"]) != calendar.session_open(label).to_pydatetime()
+                or timestamp(bar["close_at"]) != calendar.session_close(label).to_pydatetime()):
+            raise ValueError("market bar timestamps differ from the canonical XNYS session calendar")
     observed = set()
     for index, value in enumerate(times):
         session = day(value)

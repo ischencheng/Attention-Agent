@@ -8,6 +8,7 @@ import json
 import os
 import signal
 import subprocess
+import shutil
 import time
 from pathlib import Path
 import sys
@@ -90,6 +91,21 @@ class RunnerTests(unittest.TestCase):
     def invoke(self, prompt="good", **kwargs):
         return runner.run(prompt, SCHEMA, self.root, self.root / "run", 2,
                           codex_bin=str(self.cli), **kwargs)
+
+    def test_container_copy_layout_imports_without_the_repository(self):
+        # Build exactly the Python COPY layout; no checkout paths can rescue a
+        # missing shared dependency in the image or bind-mounted application.
+        dockerfile = (ROOT / "Dockerfile").read_text()
+        for line in dockerfile.splitlines():
+            fields = line.split()
+            if len(fields) == 3 and fields[0] == "COPY" and fields[1].endswith(".py"):
+                shutil.copyfile(ROOT / fields[1], self.root / Path(fields[2]).name)
+        result = subprocess.run([sys.executable, "-I", "-c",
+            "import sys; sys.path.insert(0,sys.argv[1]); import codex_runner; "
+            "assert 'Deduplicate' in codex_runner.MID_RULES; "
+            "assert 'invalidation' in codex_runner.STRONG_RULES", str(self.root)],
+            cwd=self.root, capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_native_schema_events_and_usage(self):
         prompt = "Literal prompt: `echo no` $(echo no) 中文"

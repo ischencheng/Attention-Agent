@@ -3,8 +3,9 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
-from environments.research_portfolio.archive import build_archive, digest, load_archive
+from environments.research_portfolio.archive import _session_calendar, build_archive, digest, load_archive, validate_market
 from environments.research_portfolio.collector import source_record
 from environments.research_portfolio.scenario import timestamp
 
@@ -31,7 +32,7 @@ def inputs():
               "provider": "Yahoo Finance chart API", "request_url": "https://query1.finance.yahoo.com/v8/finance/chart/ISS",
               "fetched_at": "2026-10-24T11:00:00Z", "raw_response": raw_prices,
               "raw_response_sha256": digest(raw_prices), "bars_sha256": digest(bars),
-              "corporate_actions_sha256": digest([])}]}
+              "corporate_actions_sha256": digest([]), "calendar": "XNYS", "calendar_version": "4.13.2"}]}
     identity = {"model_id": "fixture/model", "revision": "a" * 40,
                 "released_at": "2025-04-29T00:00:00Z", "release_evidence_url": "https://models.example/release",
                 "revision_evidence_url": "https://models.example/commit/" + "a" * 40,
@@ -185,6 +186,55 @@ class ArchiveTests(unittest.TestCase):
         receipt["raw_response_sha256"] = digest(receipt["raw_response"])
         with self.assertRaisesRegex(ValueError, "cannot be silently removed"):
             build_archive(spec, sources, market, policies)
+
+    def test_rehashed_session_times_cannot_expose_a_close_before_the_market_opens(self):
+        changes = ({"open_at": "2026-10-22T12:30:00Z"}, {"close_at": "2026-10-22T14:00:00Z"},
+                   {"open_at": "2026-10-22T12:30:00Z", "close_at": "2026-10-22T13:00:00Z"})
+        for changed in changes:
+            with self.subTest(changed=changed):
+                spec, sources, market, policies = inputs()
+                market["bars"][0].update(changed)
+                market["receipts"][0]["bars_sha256"] = digest(market["bars"])
+                with self.assertRaisesRegex(ValueError, "session calendar"):
+                    build_archive(spec, sources, market, policies)
+
+    def test_session_calendar_honors_dst_and_early_closes(self):
+        sessions = [("2025-10-31", "13:30:00", "20:00:00"),
+                    ("2025-11-03", "14:30:00", "21:00:00"),
+                    ("2025-11-28", "14:30:00", "18:00:00")]
+        for day, opened, closed in sessions:
+            with self.subTest(session=day):
+                market = inputs()[2]
+                bar = {**market["bars"][0], "open_at": day + "T" + opened + "Z",
+                       "close_at": day + "T" + closed + "Z"}
+                market["bars"] = [bar]
+                receipt = market["receipts"][0]
+                original = receipt["raw_response"]["chart"]["result"][0]
+                original["timestamp"] = [int(timestamp(bar["open_at"]).timestamp())]
+                original["indicators"]["quote"] = [{"open": [bar["open"]], "close": [bar["close"]]}]
+                receipt["bars_sha256"] = digest(market["bars"])
+                receipt["raw_response_sha256"] = digest(receipt["raw_response"])
+                self.assertEqual(validate_market(market), market)
+                # The same raw daily prices do not authorize a fixed UTC close
+                # copied across the DST boundary or onto the half-day session.
+                bar["close_at"] = day + ("T21:00:00Z" if closed != "21:00:00" else "T20:00:00Z")
+                receipt["bars_sha256"] = digest(market["bars"])
+                with self.assertRaisesRegex(ValueError, "session calendar"):
+                    validate_market(market)
+
+    def test_missing_or_changed_calendar_identity_is_rejected(self):
+        for key, value in (("calendar", "24/7"), ("calendar_version", "unknown"), ("calendar_version", None)):
+            market = inputs()[2]
+            market["receipts"][0][key] = value
+            with self.subTest(field=key, value=value), self.assertRaisesRegex(ValueError, "calendar"):
+                validate_market(market)
+
+    def test_missing_calendar_dependency_fails_closed_for_archive_admission(self):
+        _session_calendar.cache_clear()
+        self.addCleanup(_session_calendar.cache_clear)
+        with patch.dict("sys.modules", {"exchange_calendars": None}):
+            with self.assertRaisesRegex(ValueError, "pinned archive extra"):
+                validate_market(inputs()[2])
 
 
 if __name__ == "__main__":
