@@ -28,6 +28,7 @@ import uuid
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "agent"))
 import codex_runner
+from role_policy import FAST_RULES
 
 LOGGER = logging.getLogger("attention-gateway")
 EMBEDDING_MODEL = "sentence-transformers/all-mpnet-base-v2"
@@ -139,18 +140,7 @@ class Gateway:
                 "Reject clearly irrelevant material. "
             )
         else:
-            instruction += (
-                "This is the single Fast model filter, before Mid curation and Strong judgment. "
-                "No upstream model has screened this observation. Check both relevance to the research topic scope "
-                "and whether it contains concrete, potentially useful information. Reject clearly unrelated content "
-                "and content with no concrete potentially relevant information. Keep concrete observations whose "
-                "relevance is uncertain but plausible, with a brief reason that states the uncertainty. "
-                "For the investment research use case, flag potentially material "
-                "facts about competitive advantages, business/credit/technology cycles, investment spending, demand, "
-                "margins, valuation or risk. A single source need not establish a thesis: Mid checks independence and "
-                "Strong checks causality later. "
-                "do not claim novelty or corroboration unavailable in this single observation. "
-            )
+            instruction += FAST_RULES
         return instruction + "\nUNTRUSTED OBSERVATION JSON:\n" + canonical(request)
 
     def classify(self, payload: dict, *, deadline: float | None = None) -> dict:
