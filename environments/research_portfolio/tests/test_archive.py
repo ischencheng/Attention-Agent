@@ -120,6 +120,67 @@ class ArchiveTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "terminal"):
             build_archive(spec, sources, market, policies)
 
+    def test_missing_first_episode_session_is_rejected_after_rehashing(self):
+        for remove_from_provider in (False, True):
+            with self.subTest(remove_from_provider=remove_from_provider):
+                spec, sources, market, policies = inputs()
+                market["bars"].pop(0)
+                receipt = market["receipts"][0]
+                receipt["bars_sha256"] = digest(market["bars"])
+                if remove_from_provider:
+                    original = receipt["raw_response"]["chart"]["result"][0]
+                    original["timestamp"].pop(0)
+                    for values in original["indicators"]["quote"][0].values():
+                        values.pop(0)
+                    receipt["raw_response_sha256"] = digest(receipt["raw_response"])
+                with self.assertRaisesRegex(ValueError, "episode session coverage"):
+                    build_archive(spec, sources, market, policies)
+
+    def test_episode_coverage_boundary_is_independent_of_the_remaining_bars(self):
+        for start, required in (("2026-10-22T13:30:00Z", True),
+                                ("2026-10-22T14:00:00Z", True),
+                                ("2026-10-22T20:00:00Z", True),
+                                ("2026-10-22T20:00:00.000001Z", False)):
+            with self.subTest(start=start):
+                spec, sources, market, policies = inputs()
+                spec["start_at"] = start
+                row = sources["records"][0]
+                sources["records"] = [source_record({"id": 1, "created_at": start,
+                                                     "raw": row["raw"], "payload": row["payload"]})]
+                market["bars"].pop(0)
+                market["receipts"][0]["bars_sha256"] = digest(market["bars"])
+                if required:
+                    with self.assertRaisesRegex(ValueError, "episode session coverage"):
+                        build_archive(spec, sources, market, policies)
+                else:
+                    result = build_archive(spec, sources, market, policies)
+                    self.assertEqual(len(result["manifest"]["bars"]), 1)
+
+    def test_episode_session_coverage_respects_holidays_weekends_and_half_days(self):
+        spec, sources, market, policies = inputs()
+        start, end = "2026-11-26T12:00:00Z", "2026-11-30T21:00:00Z"
+        spec.update(start_at=start, end_at=end)
+        row = sources["records"][0]
+        sources.update(collected_at="2026-12-01T12:00:00Z",
+                       records=[source_record({"id": 1, "created_at": start, "raw": row["raw"],
+                                               "payload": {**row["payload"], "timestamp": start}})],
+                       selection={"start_at": start, "end_at": end, "received_row_count": 1})
+        market["assets"][0]["available_at"] = start
+        market["collected_at"] = "2026-12-01T12:00:00Z"
+        for bar, day, close in zip(market["bars"], ("27", "30"), ("18:00:00", "21:00:00")):
+            bar.update(open_at=f"2026-11-{day}T14:30:00Z", close_at=f"2026-11-{day}T{close}Z")
+        receipt = market["receipts"][0]
+        receipt["fetched_at"] = "2026-12-01T11:00:00Z"
+        receipt["raw_response"]["chart"]["result"][0]["timestamp"] = [
+            int(timestamp(bar["open_at"]).timestamp()) for bar in market["bars"]]
+        receipt["raw_response_sha256"] = digest(receipt["raw_response"])
+        receipt["bars_sha256"] = digest(market["bars"])
+        self.assertTrue(build_archive(spec, sources, market, policies)["contract"]["replay_integrity"]["benchmark_eligible"])
+        market["bars"].pop(0)
+        receipt["bars_sha256"] = digest(market["bars"])
+        with self.assertRaisesRegex(ValueError, "episode session coverage"):
+            build_archive(spec, sources, market, policies)
+
     def test_saved_manifest_and_admission_tampering_are_rejected(self):
         for filename in ("episode.json", "archive-contract.json"):
             with self.subTest(filename=filename), tempfile.TemporaryDirectory() as temporary:

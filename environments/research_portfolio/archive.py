@@ -274,6 +274,25 @@ def _verify_price_projection(receipt, asset, bars, actions):
                 raise ValueError("reported corporate actions cannot be silently removed")
 
 
+def _verify_episode_session_coverage(manifest, start, end):
+    """Require sessions from the episode clock, independently of retained bars."""
+    zone = ZoneInfo("America/New_York")
+    first, last = start.astimezone(zone).date(), end.astimezone(zone).date()
+    calendar = _session_calendar(first.year, last.year)
+    # Include a session whose close equals the start: that completed bar is
+    # already observable at reset. Earlier completed warmup bars are optional.
+    required = {label.date() for label in calendar.sessions_in_range(first.isoformat(), last.isoformat())
+                if calendar.session_close(label).to_pydatetime() >= start
+                and calendar.session_open(label).to_pydatetime() <= end}
+    for asset in manifest["assets"]:
+        present = {timestamp(bar["close_at"]).astimezone(zone).date() for bar in manifest["bars"]
+                   if bar["asset_id"] == asset["asset_id"]}
+        missing = sorted(required - present)
+        if missing:
+            raise ValueError(f"market episode session coverage is incomplete for {asset['asset_id']}: "
+                             + ", ".join(day.isoformat() for day in missing))
+
+
 def _assemble(spec, source_bundle, market_bundle):
     start, end = timestamp(spec.get("start_at")), timestamp(spec.get("end_at"))
     if start >= end:
@@ -306,6 +325,7 @@ def _assemble(spec, source_bundle, market_bundle):
                 "sources": [{key: row[key] for key in source_fields} for row in selected]}
     manifest = load_manifest(manifest)
     Market(manifest)  # Reuse complete-grid, terminal close and accounting checks.
+    _verify_episode_session_coverage(manifest, start, end)
     return manifest
 
 
