@@ -192,7 +192,8 @@ class CodexPolicy:
 def run_episode(manifest, output, *, actions=None, codex=False, model=None,
                 max_calls=24, timeout=120, max_steps=512, actions_per_cutoff=64,
                 policy_runner=None, codex_bin="codex", strict_replay=False,
-                scheduled=False, archive_bundle=None, model_endpoint=None, policy_manifest=None):
+                scheduled=False, archive_bundle=None, model_endpoint=None, policy_manifest=None,
+                framework_snapshot=None):
     base_manifest = load_manifest(manifest)
     if archive_bundle is not None:
         archive_bundle = json_copy(archive_bundle)
@@ -208,7 +209,8 @@ def run_episode(manifest, output, *, actions=None, codex=False, model=None,
             raise ValueError("policy identities differ from the retained archive")
         policy_manifest = deepcopy(rebuilt["policy_manifest"])
     env = ResearchPortfolioEnv(base_manifest, max_steps=max_steps, actions_per_cutoff=actions_per_cutoff,
-                               strict_replay=strict_replay, scheduled=scheduled)
+                               strict_replay=strict_replay, scheduled=scheduled,
+                               framework_snapshot=framework_snapshot)
     if actions is not None:
         actions = json_copy(actions)
         if not isinstance(actions, list) or any(not isinstance(action, dict) for action in actions):
@@ -230,6 +232,8 @@ def run_episode(manifest, output, *, actions=None, codex=False, model=None,
             write_json(archive_dir / filename, archive_bundle[key])
     episode = deepcopy(env.manifest)
     write_json(output / "episode.json", episode)
+    framework = env.framework_snapshot
+    write_json(output / "framework.json", framework)
     implementation_files = ("env.py", "market.py", "scenario.py", "runner.py", "clock.py", "reconcile.py",
                             "archive.py", "collector.py", "experiment.py", "local_model.py", "model_server.py")
     if (Path(__file__).parent / "modal_policy.py").is_file():
@@ -238,6 +242,8 @@ def run_episode(manifest, output, *, actions=None, codex=False, model=None,
         "scenario_sha256": hashlib.sha256(json.dumps(episode, sort_keys=True, ensure_ascii=False,
                                                      allow_nan=False).encode()).hexdigest(),
         "reward_contract": "terminal_net_portfolio_return_v1",
+        "framework_path": "framework.json",
+        "framework_sha256": digest(framework),
         "archive_path": "archive" if archive_bundle is not None else None,
         "archive_contract_sha256": digest(archive_bundle["contract"]) if archive_bundle is not None else None,
         "max_steps": max_steps, "actions_per_cutoff": actions_per_cutoff,

@@ -16,6 +16,8 @@ def main(argv=None):
     parser.add_argument("--strict-replay", action="store_true", help="Use original reads and counterevidence review, without search")
     parser.add_argument("--scheduled", action="store_true", help="Replay independent 30/40-minute role schedules")
     parser.add_argument("--actions", type=Path, help="JSON array of action objects for replay")
+    parser.add_argument("--framework-snapshot", type=Path,
+                        help="Retained framework.json to reuse for scripted replay")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--model", help="Override all roles; default uses the production role models")
     parser.add_argument("--codex-bin", default="codex", help="Path to a Codex 0.163-compatible executable")
@@ -34,10 +36,13 @@ def main(argv=None):
         parser.error("--archive requires codex and --model-endpoint; its scenario and model are frozen")
     if args.command != "codex" and args.model_endpoint:
         parser.error("--model-endpoint requires codex")
+    if args.framework_snapshot and args.command != "replay":
+        parser.error("--framework-snapshot requires replay")
     scenario = args.scenario or Path(__file__).parent / "fixtures" / "demo.json"
     actions = demo_actions() if args.command == "demo" else (
         json.loads(args.actions.read_text()) if args.actions else None)
     try:
+        framework = json.loads(args.framework_snapshot.read_text()) if args.framework_snapshot else None
         if args.archive:
             from .experiment import run_archived
             summary = run_archived(args.archive, args.output, model_endpoint=args.model_endpoint,
@@ -49,7 +54,7 @@ def main(argv=None):
                               codex_bin=args.codex_bin,
                               max_steps=args.max_steps, actions_per_cutoff=args.actions_per_cutoff,
                               strict_replay=args.strict_replay, scheduled=args.scheduled,
-                              model_endpoint=args.model_endpoint)
+                              model_endpoint=args.model_endpoint, framework_snapshot=framework)
     except (ValueError, OSError) as exc:
         parser.exit(2, f"{type(exc).__name__}: {exc}\n")
     print(json.dumps(summary, ensure_ascii=False, allow_nan=False))

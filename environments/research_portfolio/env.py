@@ -57,8 +57,17 @@ ACTION_CONTRACT = {
 class ResearchPortfolioEnv:
     def __init__(self, manifest: dict | str | Path, *, actions_per_cutoff: int = 64,
                  max_steps: int = 512, strict_replay: bool = False,
-                 scheduled: bool = False):
+                 scheduled: bool = False, framework_snapshot: dict | None = None):
         self.manifest = load_manifest(manifest)
+        # The reference is an episode input. A deployment or local file update
+        # must not change research guidance halfway through a recorded rollout.
+        if framework_snapshot is None:
+            framework_snapshot = json.loads((Path(__file__).parent / "fixtures" / "mrbrain_framework.json").read_text())
+        self._framework_snapshot = json_copy(framework_snapshot)
+        if (not isinstance(self._framework_snapshot, dict)
+                or not isinstance(self._framework_snapshot.get("framework"), dict)
+                or not self._framework_snapshot["framework"]):
+            raise ValueError("framework snapshot must contain a nonempty framework object")
         if type(strict_replay) is not bool or type(scheduled) is not bool:
             raise ValueError("strict_replay and scheduled must be boolean")
         self.strict_replay, self.scheduled = strict_replay, scheduled
@@ -102,6 +111,10 @@ class ResearchPortfolioEnv:
     @property
     def now(self):
         return self.manifest["timeline"][self.index]
+
+    @property
+    def framework_snapshot(self):
+        return copy.deepcopy(self._framework_snapshot)
 
     def _visible_sources(self):
         now = timestamp(self.now)
@@ -453,9 +466,8 @@ class ResearchPortfolioEnv:
                 asset_id = text(args["asset_id"], "framework asset_id")
                 if asset_id not in self.discovered_assets:
                     raise ValueError("framework asset must have been discovered")
-            frozen = json.loads((Path(__file__).parent / "fixtures" / "mrbrain_framework.json").read_text())
             result = {"kind": "frozen_original_framework", "source": "skills/mrbrain_invest.py FRAMEWORK",
-                      "original_framework": frozen,
+                      "original_framework": self.framework_snapshot,
                       "dimensions": list(FRAMEWORK_FIELDS), "checklist": list(RISK_FIELDS),
                       "instructions": "Assess each dimension against read evidence. Record PASS, FAIL or UNKNOWN and a reason for every prohibition. NO PRICE DATA blocks increases. Failed gates never block corrections, invalidation or reducing risk.",
                       "limitation": "Bundled original framework snapshot, not a live MrBrain CLI call or generated investment analysis."}

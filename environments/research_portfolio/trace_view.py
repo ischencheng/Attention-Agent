@@ -279,6 +279,10 @@ def _integrity(summary, trajectory):
     recorded = admission or integrity
     models = sorted({str(_mapping(record.get("invocation")).get("model")) for record in trajectory
                      if _mapping(record.get("invocation")).get("model")})
+    configured = _mapping(_mapping(summary.get("policy_manifest")).get("roles"))
+    checkpoints = [str(role) + ": " + str(identity.get("model_id", "Unknown"))
+                   + " @ " + str(identity.get("revision", "Unknown"))
+                   for role, identity in configured.items() if isinstance(identity, dict)]
     def check(key):
         value = recorded.get(key)
         return "Verified" if value is True else "Not verified" if value is False else "Not supplied"
@@ -306,7 +310,8 @@ def _integrity(summary, trajectory):
             ("Cutoff verification", check("model_cutoff_verified")),
             ("Model files", check("model_files_verified")),
             ("Policy", str(summary.get("policy", "Not supplied"))),
-            ("Models in accepted transitions", ", ".join(models) or "Not supplied"),
+            ("Configured checkpoint identities", " · ".join(checkpoints) or "Not supplied"),
+            ("Models recorded on transitions", ", ".join(models) or "See invocation artifacts"),
             ("Training", "No training performed" if summary.get("training_performed") is False else
              "Training reported in summary" if summary.get("training_performed") is True else "Not supplied")]
     reasons = recorded.get("reasons", [])

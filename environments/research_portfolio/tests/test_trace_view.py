@@ -33,6 +33,14 @@ class Elements(HTMLParser):
 
 
 class TraceViewTests(unittest.TestCase):
+    def test_configured_checkpoints_do_not_imply_role_execution(self):
+        summary = {"policy_manifest": {"roles": {"strong": {
+            "model_id": "frozen/model", "revision": "immutable-revision"}}}}
+        document = render_trace(summary, [])
+        self.assertIn("strong: frozen/model @ immutable-revision", document)
+        self.assertIn("Models recorded on transitions</dt><dd>See invocation artifacts", document)
+        self.assertIn("0 model calls", document)
+
     def test_untrusted_source_content_cannot_add_markup_links_or_script(self):
         payload = '</script><script>alert("source")</script><img src=x onerror=alert(1)><a href="javascript:alert(2)">x</a>'
         record = {"step": 1, "role": payload, "action": {"type": payload, "source_id": payload},
