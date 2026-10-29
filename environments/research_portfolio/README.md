@@ -60,9 +60,9 @@ including rejection reasons. A rejection ends the batch so the policy can
 correct it before attempting dependent actions.
 
 The inference observation retains durable facts, questions, judgments, source
-metadata and tool receipts. Full original bodies appear when a read returns;
-the latest batch's new originals are delivered intact. Earlier bodies are
-available through another explicit read. This memory projection removes
+metadata and tool receipts. Pending original bodies are delivered intact when
+their requesting role next runs, including after idle cutoffs or intervening
+calls to other roles. Delivered bodies are available through another explicit read. This memory projection removes
 duplicate copies of past articles; it does not generate hidden summaries or
 truncate newly retrieved evidence.
 

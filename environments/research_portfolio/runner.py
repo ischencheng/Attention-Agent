@@ -30,7 +30,7 @@ class InvalidPolicyOutput(ValueError):
 
 
 def policy_observation(observation):
-    """Keep durable research state and receipts, delivering each new read once.
+    """Keep durable state and deliver pending originals to their requesting role.
 
     Originals remain available through explicit reads. Repeating every full
     article in both global read state, tool history and feedback makes context
@@ -39,8 +39,10 @@ def policy_observation(observation):
     """
     visible = deepcopy(observation)
     feedback = visible.get("execution_feedback", [])
-    current_tools = {item.get("result", {}).get("result", {}).get("tool_call_id")
-                     for item in feedback}
+    role = visible.get("suggested_role")
+    receipts = [item.get("result", {}).get("result", {}) for item in feedback]
+    current_tools = {receipt.get("tool_call_id") for receipt in receipts
+                     if role is None or receipt.get("role") in (None, role)}
     visible["read_sources"] = [{key: value for key, value in source.items() if key != "body"}
                                for source in visible.get("read_sources", [])]
     for receipt in visible.get("tool_results", []):
@@ -55,7 +57,7 @@ def policy_observation(observation):
             receipt.get("result", {}).pop("body", None)
             receipt["body_location"] = "tool_results entry with this tool_call_id"
     visible["retrieval_memory"] = (
-        "read_sources is an index. New original bodies are delivered in tool_results for the previous batch. "
+        "read_sources is an index. Pending original bodies are delivered in tool_results when the requesting role next runs. "
         "Older read receipts retain IDs and metadata; use read again to retrieve their full original. "
         "Themes, facts, questions and judgments remain durable. Repeated source arrivals still require routing by their own ID.")
     return visible
@@ -262,6 +264,7 @@ def run_episode(manifest, output, *, actions=None, codex=False, model=None,
     scripted = iter(actions or [])
     exhausted = object()
     feedback = []
+    pending_reads = {role: {} for role in ("fast", "mid", "strong")}
     write_json(output / "reset.json", {"observation": observation, "info": reset_info})
 
     def apply(action, invocation, *, decoder_error=None):
@@ -300,14 +303,27 @@ def run_episode(manifest, output, *, actions=None, codex=False, model=None,
         while not done:
             if policy and observation["suggested_role"] is None:
                 done = apply({"type": "wait", "role": "strong", "reason": "No new evidence or due research at this virtual cutoff."}, None)
-                feedback = []
+                # No model has consumed the previous batch yet. Keep its read
+                # receipts pending through idle cutoffs; the next policy call
+                # receives their original bodies before new feedback replaces it.
                 continue
             if policy:
                 # Each ephemeral call sees attempted actions and actual execution
                 # feedback from the previous batch, including rejection reasons.
+                # Other roles may run first after a cutoff advances, so keep read
+                # results until their requesting role receives its next prompt.
+                role = observation["suggested_role"]
+                delivery_feedback = list(feedback)
+                current_ids = {item.get("result", {}).get("result", {}).get("tool_call_id")
+                               for item in feedback}
+                delivery_feedback.extend(item for key, item in pending_reads[role].items()
+                                         if key not in current_ids)
                 try:
-                    batch, invocation = policy.choose({**observation, "execution_feedback": feedback})
+                    batch, invocation = policy.choose({**observation, "execution_feedback": delivery_feedback})
+                    if invocation is not None:
+                        pending_reads[role].clear()
                 except InvalidPolicyOutput as exc:
+                    pending_reads[role].clear()  # The prompt was delivered even if its response is invalid.
                     done = apply({"type": "invalid_policy_output", "role": exc.invocation["role"]},
                                  exc.invocation, decoder_error=str(exc))
                     feedback = [{"step": records[-1]["step"], "action_origin": "decoder",
@@ -340,6 +356,9 @@ def run_episode(manifest, output, *, actions=None, codex=False, model=None,
                 feedback.append({"step": records[-1]["step"],
                                  "action": deepcopy(records[-1]["action"]),
                                  "result": deepcopy(records[-1]["result"])})
+                receipt = feedback[-1]["result"].get("result", {})
+                if policy and receipt.get("tool") == "read" and receipt.get("tool_call_id"):
+                    pending_reads[receipt["role"]][receipt["tool_call_id"]] = feedback[-1]
                 executed_indices.append(action_index)
                 tools_executed |= action.get("type") == "tool"
                 if (done or observation["as_of"] != cutoff or "rejection" in records[-1]["result"]

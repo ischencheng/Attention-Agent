@@ -187,6 +187,116 @@ class ScheduledReplayTests(unittest.TestCase):
                 self.assertEqual(env.observation()["suggested_role"], "strong")
                 self.assertNotIn("rejection", env.step(tool("read", source_id="earnings"))[4])
 
+    def test_read_body_reaches_next_model_prompt_after_automatic_idle_wait(self):
+        data = fixture()
+        batches = [
+            {"type": "triage", "role": "fast", "source_id": "earnings",
+             "disposition": "advance", "reason": "An official clue"},
+            {"type": "tool", "role": "mid", "tool": "read", "args": {"source_id": "earnings"}},
+            {"type": "accumulate", "role": "mid", "theme_id": "power",
+             "ticket_ids": ["ticket-earnings"], "summary": "Power results",
+             "facts": [{"source_id": "earnings", "claim": "Revenue rose"}],
+             "open_questions": ["Is growth durable?"], "authoritative_exception": True,
+             "exception_reason": "Official filing"},
+            action("open_research", question_id="capacity", theme_id="power", question="Is growth durable?"),
+            tool("read", source_id="earnings"),
+            tool("catalog", offset=0, limit=1),
+            action("stop", reason="Finish the prompt delivery probe"),
+        ]
+        prompts = []
+
+        def fake(prompt, *args, **kwargs):
+            prompts.append(json.loads(prompt.rsplit("\n\n", 1)[1]))
+            return {"events": [], "final": {"actions_json": json.dumps([batches[len(prompts) - 1]])}}
+
+        with tempfile.TemporaryDirectory() as output:
+            summary = run_episode(data, output, codex=True, strict_replay=True, scheduled=True,
+                                  policy_runner=fake, actions_per_cutoff=5, max_calls=8)
+            records = [json.loads(line) for line in (Path(output) / "trajectory.jsonl").read_text().splitlines()]
+        self.assertEqual(summary["run_status"], "completed")
+        self.assertEqual(summary["rejected_actions"], 0)
+        self.assertEqual(len(prompts), 7)
+        self.assertEqual(records[4]["action"]["tool"], "read")
+        self.assertEqual(records[4]["observation"]["as_of"], "2025-06-02T20:30:00+00:00")
+        self.assertEqual(records[5]["action"]["type"], "wait")
+        self.assertIsNone(records[5]["invocation"])
+
+        delivered = prompts[5]
+        self.assertEqual(delivered["as_of"], "2025-06-02T20:40:00+00:00")
+        self.assertEqual(delivered["suggested_role"], "strong")
+        self.assertEqual([item["step"] for item in delivered["execution_feedback"]], [5])
+        read_id = delivered["execution_feedback"][0]["result"]["result"]["tool_call_id"]
+        receipt = next(item for item in delivered["tool_results"] if item["tool_call_id"] == read_id)
+        self.assertEqual(receipt["result"]["body"], data["sources"][0]["body"])
+        self.assertEqual(json.dumps(delivered).count(data["sources"][0]["body"]), 1)
+
+        consumed = prompts[6]
+        self.assertEqual([item["action"]["tool"] for item in consumed["execution_feedback"]], ["catalog"])
+        old_receipt = next(item for item in consumed["tool_results"] if item["tool_call_id"] == read_id)
+        self.assertNotIn("body", old_receipt["result"])
+        self.assertEqual(old_receipt["result"]["id"], "earnings")
+
+    def test_strong_read_waits_for_its_role_across_fast_and_mid_invocations(self):
+        for disposition in ("ignore", "advance"):
+            with self.subTest(new_arrival_disposition=disposition):
+                data = fixture()
+                data["sources"][1].update(available_at="2025-06-02T20:30:00Z",
+                                           published_at="2025-06-02T20:30:00Z")
+                accumulation = {"type": "accumulate", "role": "mid", "theme_id": "power",
+                                "ticket_ids": ["ticket-earnings"], "summary": "Power results",
+                                "facts": [{"source_id": "earnings", "claim": "Revenue rose"}],
+                                "open_questions": ["Is growth durable?"], "authoritative_exception": True,
+                                "exception_reason": "Official filing"}
+                batches = [
+                    {"type": "triage", "role": "fast", "source_id": "earnings",
+                     "disposition": "advance", "reason": "An official clue"},
+                    {"type": "tool", "role": "mid", "tool": "read", "args": {"source_id": "earnings"}},
+                    accumulation,
+                    action("open_research", question_id="capacity", theme_id="power", question="Is growth durable?"),
+                    tool("read", source_id="earnings"),
+                    {"type": "tool", "role": "fast", "tool": "read", "args": {"source_id": "contrary"}},
+                    {"type": "triage", "role": "fast", "source_id": "contrary",
+                     "disposition": disposition, "reason": "Route the later customer report"},
+                ]
+                if disposition == "advance":
+                    batches.extend([
+                        {"type": "tool", "role": "mid", "tool": "read", "args": {"source_id": "contrary"}},
+                        {**accumulation, "ticket_ids": ["ticket-earnings", "ticket-contrary"],
+                         "facts": [*accumulation["facts"], {"source_id": "contrary", "claim": "Customer delay"}]},
+                    ])
+                resumed_index = len(batches)
+                batches.extend([tool("catalog", offset=0, limit=1),
+                                action("stop", reason="Finish the cross-role prompt probe")])
+                prompts = []
+
+                def fake(prompt, *args, **kwargs):
+                    prompts.append(json.loads(prompt.rsplit("\n\n", 1)[1]))
+                    return {"events": [], "final": {"actions_json": json.dumps([batches[len(prompts) - 1]])}}
+
+                with tempfile.TemporaryDirectory() as output:
+                    summary = run_episode(data, output, codex=True, strict_replay=True, scheduled=True,
+                                          policy_runner=fake, actions_per_cutoff=5, max_calls=12)
+                self.assertEqual(summary["run_status"], "completed")
+                self.assertEqual(summary["rejected_actions"], 0)
+                self.assertEqual([item["suggested_role"] for item in prompts[5:resumed_index]],
+                                 ["fast", "fast"] + (["mid", "mid"] if disposition == "advance" else []))
+                for intervening in prompts[5:resumed_index]:
+                    self.assertNotIn(data["sources"][0]["body"], json.dumps(intervening))
+                resumed = prompts[resumed_index]
+                self.assertEqual(resumed["suggested_role"], "strong")
+                self.assertEqual(resumed["as_of"], "2025-06-02T20:40:00+00:00")
+                own_read = next(item for item in resumed["tool_results"]
+                                if item["tool"] == "read" and item["role"] == "strong")
+                self.assertEqual(own_read["result"].get("body"), data["sources"][0]["body"])
+                read_feedback = [item for item in resumed["execution_feedback"]
+                                 if item["result"].get("result", {}).get("tool_call_id") == own_read["tool_call_id"]]
+                self.assertEqual(len(read_feedback), 1)
+                self.assertEqual(read_feedback[0]["step"], 5)
+                self.assertEqual(json.dumps(resumed).count(data["sources"][0]["body"]), 1)
+                next_prompt = prompts[resumed_index + 1]
+                self.assertNotIn(data["sources"][0]["body"], json.dumps(next_prompt))
+                self.assertEqual([item["action"]["tool"] for item in next_prompt["execution_feedback"]], ["catalog"])
+
     def test_explicit_strong_wait_acknowledges_the_cycle_and_preserves_idle_skip(self):
         env = ResearchPortfolioEnv(fixture(), strict_replay=True, scheduled=True)
         fixtures.ResearchPortfolioTests().prepare_question(env)
