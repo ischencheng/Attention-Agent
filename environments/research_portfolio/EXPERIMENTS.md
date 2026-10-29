@@ -1,28 +1,61 @@
 # Recorded replay experiments
 
-The initial local development attempts produced **no research questions,
-judgments or positions**. They exposed a process-launch failure, repeated action
-rejections and partial progress interrupted when inference was moved to a
-remote GPU. Their zero account returns are retained below. These attempts do
-not provide evidence of investment skill or policy improvement.
+The first remote GPU episode **failed after repeated reads and an output-token
+limit**. It reached one accumulated theme but produced no research question,
+judgment or position. Its account remained at $100,000; the recorded zero return
+is an ineligible accounting outcome, not demonstrated investment performance.
 
 These runs were executed on October 29, 2026. This is a sanitized aggregate
 record derived from the saved summaries, invocation records, trajectories,
 archive contract and account reconciliation. Original source bodies, production
 record identifiers and raw model traces remain local.
 
-## Remote GPU attempt
+## Remote GPU result
 
-The next run uses `Qwen/Qwen3-14B` at revision
-`40c069824f4251a91eefaf281ebe4c544efd3e18` on **one NVIDIA L40S**. The worker
-initialized and verified its model files; recorded packages are vLLM 0.32.0,
-PyTorch 2.13.0+cu130, Transformers 5.19.0 and huggingface-hub 2.2.0. The source
-episode and financial contract are unchanged, with a new archive manifest for
-this model identity. The first GPU transport smoke failed before generating
-tokens: the installed tokenizer returned a `BatchEncoding` where the adapter
-expected a token list. The adapter now explicitly requests and validates an
-integer token list. Generation and episode results are pending verification;
-worker readiness alone is not a completed model experiment.
+The [machine-readable result](results/2026-10-29-qwen14b-l40s-v1.json) records
+aggregate counts, validity flags, model identity and hashes of the archive,
+contract and implementation. The episode ran code commit
+`683e03a52af9fc68f9573f0a588d2ded77c1eeb8`; all 12 implementation hashes recorded
+in its contract match that commit.
+
+| Measure | Observed result |
+| --- | --- |
+| Model calls | 47 attempts: 44 completed, 2 invalid action-JSON outputs, 1 failed generation. Fast: 45; Mid: 2; Strong: 0. |
+| Executed model actions | 56 successful reads of **one distinct original**, one triage and one accumulation. Two decoder-origin rejection markers were recorded separately. |
+| Research state | 1 ticket and 1 theme; 0 research questions, judgments or revisions. |
+| Ending | The last generation reached its fixed 2,048-token output limit. Codex reported an incomplete response and failed the run. The 96-call budget was not exhausted. |
+| Validity | `run_status=failed`, `policy_outcome=failed`, `evaluation_eligible=false`. The harness still settled the account to the original horizon. |
+| Financial state | Initial cash, final cash and terminal NAV: $100,000. Reward: 0. No positions or fills; no explicit hold decision was established. |
+| Accounting check | Independent reconciliation passed, with 0 fills checked. |
+| Replay check | Replaying all 74 recorded transitions reproduced the account, reward, research counts and terminal flags. This is an action-replay check, not another model attempt. |
+
+The final failed request contained 21,186 input tokens and produced exactly
+2,048 output tokens. The bridge recorded **674,354 input and 5,558 output
+tokens** across the 47 episode requests, including that failed generation and
+excluding the transport smoke. The 46 usage-bearing model-call records report
+653,168 input and 3,510 output tokens; the difference is the failed request.
+Billing was not retrieved.
+
+| Runtime | Recorded configuration |
+| --- | --- |
+| Hardware and checkpoint | One NVIDIA L40S; `Qwen/Qwen3-14B`, revision `40c069824f4251a91eefaf281ebe4c544efd3e18`, BF16. |
+| Software | Codex CLI 0.163.0; vLLM 0.32.0; PyTorch 2.13.0+cu130; Transformers 5.19.0; huggingface-hub 2.2.0. |
+| Decoding | Thinking disabled, temperature 0, seed 0, concurrency 1; 24,000 input and 2,048 output tokens per request. |
+| Validation | Model files and serving identity checked. Structured decoding constrained the response envelope; action JSON and environment prerequisites remained separately validated. |
+| Lifecycle | The GPU app was confirmed stopped with 0 tasks at 07:06:32 UTC. No training occurred. |
+
+The first GPU transport smoke failed before generating tokens because the
+installed tokenizer returned a `BatchEncoding` where the adapter expected a
+token list. After an explicit token-list correction, the Codex smoke returned
+`ok=true` with 162 input and 6 output tokens. That transport check is separate
+from the unsuccessful research episode.
+
+The source episode and financial contract were retained from the local
+iterations, with a new policy manifest for the larger checkpoint. The action
+instructions and observation-memory projection also changed during development.
+This is therefore not a controlled model comparison. The run predates the later
+`framework.json` snapshot fix and never called the framework tool; the later
+fix does not retroactively change its recorded implementation.
 
 ## Local development history
 
@@ -118,8 +151,8 @@ knowledge cutoff, this limits the result to a disclosed retrospective replay.
 Strict point-in-time eligibility is false even though source-receipt and local
 model-file checks passed.
 
-Independent reconciliation confirms the recorded cash-only arithmetic in all three
-attempts. With zero fills, these attempts do not exercise trading behavior.
+Independent reconciliation confirms the cash-only arithmetic in the three local
+attempts and the GPU episode. With zero fills, they do not exercise trading behavior.
 The synthetic example and tests cover additional mechanics under their own
 explicit contracts; their results are separate from model performance.
 

@@ -1,0 +1,327 @@
+{
+  "format": "attention-replay-public-summary-v1",
+  "experiment": "2026-10-29-qwen14b-l40s-v1",
+  "scope": "Sanitized aggregate of one development inference attempt; not a training result or eligible investment-performance sample.",
+  "policy": {
+    "runner": "Codex CLI",
+    "cli_versions": [
+      "codex-cli 0.163.0"
+    ],
+    "served_model": "attention-qwen3-14b-40c0698",
+    "roles": {
+      "fast": {
+        "model_id": "Qwen/Qwen3-14B",
+        "revision": "40c069824f4251a91eefaf281ebe4c544efd3e18",
+        "released_at": "2025-07-26T03:49:23Z",
+        "release_evidence_url": "https://qwenlm.github.io/blog/qwen3/",
+        "revision_evidence_url": "https://huggingface.co/Qwen/Qwen3-14B/commit/40c069824f4251a91eefaf281ebe4c544efd3e18",
+        "knowledge_cutoff": null,
+        "temporal_basis": "checkpoint_published_before_episode"
+      },
+      "mid": {
+        "model_id": "Qwen/Qwen3-14B",
+        "revision": "40c069824f4251a91eefaf281ebe4c544efd3e18",
+        "released_at": "2025-07-26T03:49:23Z",
+        "release_evidence_url": "https://qwenlm.github.io/blog/qwen3/",
+        "revision_evidence_url": "https://huggingface.co/Qwen/Qwen3-14B/commit/40c069824f4251a91eefaf281ebe4c544efd3e18",
+        "knowledge_cutoff": null,
+        "temporal_basis": "checkpoint_published_before_episode"
+      },
+      "strong": {
+        "model_id": "Qwen/Qwen3-14B",
+        "revision": "40c069824f4251a91eefaf281ebe4c544efd3e18",
+        "released_at": "2025-07-26T03:49:23Z",
+        "release_evidence_url": "https://qwenlm.github.io/blog/qwen3/",
+        "revision_evidence_url": "https://huggingface.co/Qwen/Qwen3-14B/commit/40c069824f4251a91eefaf281ebe4c544efd3e18",
+        "knowledge_cutoff": null,
+        "temporal_basis": "checkpoint_published_before_episode"
+      }
+    },
+    "training_performed": false
+  },
+  "runtime": {
+    "backend": "vllm",
+    "gpu": "NVIDIA L40S",
+    "gpu_count": 1,
+    "packages": {
+      "vllm": "0.32.0",
+      "torch": "2.13.0+cu130",
+      "transformers": "5.19.0",
+      "huggingface-hub": "2.2.0"
+    },
+    "enable_thinking": false,
+    "temperature": 0.0,
+    "seed": 0,
+    "max_input_tokens": 24000,
+    "max_output_tokens": 2048,
+    "concurrency": 1,
+    "schema_enforcement": "vLLM structured JSON schema decoding; no output repair",
+    "model_files_verified": true
+  },
+  "episode": {
+    "start_at": "2026-10-23T00:00:00+00:00",
+    "end_at": "2026-10-26T20:00:00+00:00",
+    "portfolio": {
+      "initial_cash": 100000,
+      "fee_bps": 10,
+      "slippage_bps": 5,
+      "max_weight": 0.5
+    },
+    "instrument_symbols": [
+      "NET",
+      "NVDA",
+      "UBER"
+    ],
+    "source_coverage": {
+      "arrival_versions": 27,
+      "source_native_event_ids": 10,
+      "distinct_body_values": 26,
+      "publisher_count": 2,
+      "largest_same_title_group": 18,
+      "independence_certified": false
+    },
+    "reward_contract": "terminal_net_portfolio_return_v1",
+    "max_steps": 4096,
+    "actions_per_cutoff": 64
+  },
+  "outcome": {
+    "run_status": "failed",
+    "policy_outcome": "failed",
+    "evaluation_eligible": false,
+    "complete": true,
+    "terminated": true,
+    "truncated": false,
+    "terminal_reason": "stop",
+    "steps": 74,
+    "policy_budget_exhausted": false,
+    "strict_replay": true,
+    "scheduled": true,
+    "skipped_idle_cutoffs": 13
+  },
+  "failure": {
+    "kind": "model_generation_output_limit",
+    "codex_message": "Incomplete response returned, reason: max_output_tokens",
+    "last_request_input_tokens": 21186,
+    "last_request_output_tokens": 2048,
+    "last_request_finish_reason": "length",
+    "actions_from_failed_request_executed": false
+  },
+  "counts": {
+    "model_invocations": 47,
+    "model_call_statuses": {
+      "completed": 44,
+      "invalid_output": 2,
+      "failed": 1
+    },
+    "model_calls_by_role_and_status": {
+      "fast": {
+        "completed": 42,
+        "invalid_output": 2,
+        "failed": 1
+      },
+      "mid": {
+        "completed": 2
+      },
+      "strong": {}
+    },
+    "trajectory_actions": [
+      {
+        "origin": "decoder",
+        "role": "fast",
+        "type": "invalid_policy_output",
+        "count": 2
+      },
+      {
+        "origin": "harness",
+        "role": "strong",
+        "type": "stop",
+        "count": 1
+      },
+      {
+        "origin": "harness",
+        "role": "strong",
+        "type": "wait",
+        "count": 13
+      },
+      {
+        "origin": "model",
+        "role": "fast",
+        "type": "tool",
+        "tool": "read",
+        "count": 55
+      },
+      {
+        "origin": "model",
+        "role": "fast",
+        "type": "triage",
+        "count": 1
+      },
+      {
+        "origin": "model",
+        "role": "mid",
+        "type": "accumulate",
+        "count": 1
+      },
+      {
+        "origin": "model",
+        "role": "mid",
+        "type": "tool",
+        "tool": "read",
+        "count": 1
+      }
+    ],
+    "accepted_model_actions": 58,
+    "rejected_actions": 2,
+    "invalid_policy_outputs": 2,
+    "research": {
+      "read_sources": 1,
+      "tickets": 1,
+      "themes": 1,
+      "questions": 0,
+      "theses": 0,
+      "thesis_revisions": 0,
+      "tool_calls": 56
+    },
+    "read_tool_calls": 56,
+    "distinct_read_sources": 1
+  },
+  "usage": {
+    "model_call_records": {
+      "calls_with_usage": 46,
+      "input_tokens": 653168,
+      "output_tokens": 3510,
+      "cached_input_tokens": 0,
+      "reasoning_output_tokens": 0
+    },
+    "bridge_records": {
+      "episode_requests": 47,
+      "input_tokens": 674354,
+      "output_tokens": 5558,
+      "includes_failed_output_limit_request": true,
+      "excludes_transport_smoke": true
+    },
+    "cost_reported": false
+  },
+  "account": {
+    "initial_cash": 100000,
+    "final_cash": 100000.0,
+    "terminal_nav": 100000.0,
+    "reward": 0.0,
+    "position_count": 0,
+    "receivables_total": 0,
+    "fill_count": 0,
+    "explicit_cash_decision_established": false
+  },
+  "reconciliation": {
+    "status": "passed",
+    "errors": [],
+    "recomputed_cash": 100000.0,
+    "recomputed_nav": 100000.0,
+    "recomputed_reward": 0.0,
+    "fills_checked": 0,
+    "scope": "Independent fill, fee, corporate-action and terminal valuation arithmetic; fill quantities are inputs."
+  },
+  "replay_integrity": {
+    "status": "admitted_with_limits",
+    "benchmark_eligible": true,
+    "benchmark_scope": "retrospective market-price reconstruction; captured source arrivals",
+    "strict_point_in_time_eligible": false,
+    "episode_start": "2026-10-23T00:00:00+00:00",
+    "episode_end": "2026-10-26T20:00:00+00:00",
+    "source_receipt_policy": "actual PostgreSQL receipt; no publication-time backfill",
+    "source_receipts_verified": true,
+    "source_hashes_verified": true,
+    "model_boundary_verified": true,
+    "model_cutoff_verified": false,
+    "training_cutoff": {
+      "fast": null,
+      "mid": null,
+      "strong": null
+    },
+    "model_files_verified": true,
+    "price_provenance_verified": true,
+    "price_vintage": "historical_reconstruction",
+    "reasons": [
+      "Historical prices were downloaded later and may include provider revisions; original price vintages are not certified.",
+      "Model file hashes are declared here; the inference adapter must verify the actual served files.",
+      "Training cutoff is not established for every role; the verified temporal claim is checkpoint publication before the episode."
+    ]
+  },
+  "provenance": {
+    "code_commit": "683e03a52af9fc68f9573f0a588d2ded77c1eeb8",
+    "implementation_hashes_match_commit": true,
+    "implementation_sha256": {
+      "env.py": "994a0e150d29cefd4e0d3b1a7fda1692b94f97152e9e4aea3cd9f64e941cd1e0",
+      "market.py": "2f524530ce505cba4f7af51c54b831398116834a8cf18791a63d2b97ff601cfe",
+      "scenario.py": "c7ff9e4f830dd6ce05eaa09bee39927f0f64d7d52401f949e8bbcdcea0bae93f",
+      "runner.py": "1ce1ba9a44c8134a52c2679f60aa0cca5e573018159d2f4552d31c1b79660ad0",
+      "clock.py": "006c29c73b8398dbcb4216e696d4120b2c0eb2ee22cc37e2c049cf7d86fab553",
+      "reconcile.py": "e6fa8b8b5c0505f1d12a8f23e6de1659e8385b7444765ad41f454ab936ffff82",
+      "archive.py": "fc3fc5ae6b5d0f4cd4136b42c376a8dc47392835081f11c202363cc8a8844d1c",
+      "collector.py": "a4ccc500169e0b060fdabfd1673a6cdcf329ddd80be56c5dce7dc1294a5b512c",
+      "experiment.py": "56d2a718943b2d042d92cb6b1c2be4e97383ff48ecd3b4973369f85507c01e02",
+      "local_model.py": "214264eebb61898e423cf24d0eeae14232ecbd26f27411f83139a685c1a6b5ea",
+      "model_server.py": "c33ea37fe2e1f97cd77e5a67e8f8415a964361a881cc50ae706069e700597c07",
+      "modal_policy.py": "d18c2e4e444184f888444213c89284b88e4f07e3f265fc7aac9be26a0f94c2f9"
+    },
+    "shared_role_rules_sha256": "a6a45d88bc6b649cab3dfe9389f64661abaa0bdba1237d178e05a5be633a04e3",
+    "codex_adapter_sha256": "409bb9899c5515f4aa6fbca306e23591353ae3aae7c003e3c2ad032236345a71",
+    "scenario_sha256": "de51102f273bc373b7c2a7f795e03d5216ce52a7ad6ae13b18cf28f8fc546cb7",
+    "archive_contract_sha256": "0c6291e62e665c092e096652e998ce04e43ea39aac09131580dc1afb3fa56a28",
+    "archive_input_artifact_sha256": {
+      "episode.json": "ef6caa9821f820a9df301824914405fa9055ac6a5be227ed6b371f5275893b38",
+      "sources.json": "c38e2a3ea490534c570ac7ff76a83fdd9f4e5a503631ef51f589dea2af9870d3",
+      "market.json": "998916a95f7bffbdc91486f744791da484f206d90338a4b8376f3e8abb6f52cc",
+      "policy-manifest.json": "7c189b4fdc92410e5f12df404d2760ac273fb340d64f58a516e65edb175196ec"
+    },
+    "local_input_files_sha256": {
+      "summary.json": "c2e86a4cc799672c1330f2273b33aae4eaec781222be89e75bd6e7c2fff79ec2",
+      "contract.json": "54e39d06c241d4fb445e27e8e38a147681f5db8340c8ccff22d18917de36c9fa",
+      "model-calls.json": "f039155431144f98bdccee041fd16f9cda92ebeb3cb84c31c0b5aeda412e3501",
+      "trajectory.jsonl": "1dd88d05ec73b0ad387db9b647d28019dff1bc338abaab258f734c125cf925b3",
+      "reconciliation.json": "0b2aa6dcf26ee905fd7d94c743752b07ef1729a2740ea34245e390d46184776d",
+      "archive/archive-contract.json": "e005a122ce4b72eed73b4caf5c69c62a7ef67893fdee06557be5f5a344551c5b"
+    },
+    "hash_notes": "Contract and archive digests retain their recorded canonical-JSON definitions. local_input_files_sha256 hashes file bytes. Full inputs remain local."
+  },
+  "limitations": [
+    "The episode failed and is ineligible for policy-return evaluation. Zero return reflects an untouched account, not a demonstrated hold decision.",
+    "All 56 successful reads addressed one distinct original; Strong was never invoked.",
+    "The archive is small and duplicate-heavy. Native event IDs do not certify causal independence.",
+    "Historical price reconstruction may include provider revisions; strict point-in-time eligibility is false.",
+    "The model checkpoint predates the episode; its training-data cutoff is unknown.",
+    "File and model identity checks use a trusted serving adapter, not independent remote attestation.",
+    "This is a development attempt with harness and model changes relative to local runs, not a controlled model comparison.",
+    "Reconciliation checked cash-only arithmetic with zero fills. No training, held-out learning result or investment skill is established.",
+    "Token totals include the failed generation through bridge records; billing was not retrieved.",
+    "This implementation predates the later framework.json snapshot fix and made no framework calls. Later fixes do not alter this recorded attempt."
+  ],
+  "deterministic_replay": {
+    "recorded_transitions": 74,
+    "fields_equal": [
+      "account",
+      "reward",
+      "counts",
+      "terminated",
+      "truncated",
+      "complete",
+      "terminal_reason"
+    ],
+    "matches_original": true,
+    "scope": "Action replay of recorded decisions; not another model attempt.",
+    "replay_summary_file_sha256": "3808340b3193b350accea5b750f900a46f2796c95171579353182970ed7aaa52"
+  },
+  "cleanup": {
+    "app_state": "stopped",
+    "tasks": 0,
+    "stopped_at": "2026-10-29T07:06:32Z"
+  },
+  "transport_smoke": {
+    "result": {
+      "ok": true
+    },
+    "input_tokens": 162,
+    "output_tokens": 6,
+    "included_in_episode_usage": false
+  }
+}

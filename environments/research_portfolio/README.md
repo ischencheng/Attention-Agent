@@ -78,6 +78,8 @@ Every output directory must be new or empty. Artifacts include:
 
 - `episode.json` and `contract.json`: evaluator scenario, cost and horizon inputs,
   action budgets, and hashes of the scenario and implementation.
+- `framework.json`: the framework tool snapshot frozen when the environment is
+  constructed, with its canonical hash in the contract for new runs.
 - `trajectory.jsonl`: durable actions, public observations, actual tool results,
   role/invocation IDs, rejection reasons, state changes and rewards.
 - `actions.json`: executed actions for deterministic replay.
@@ -93,8 +95,13 @@ Replay the executed actions with the same action budgets recorded in the contrac
 python -m environments.research_portfolio replay \
   --scenario /tmp/research-demo/episode.json \
   --actions /tmp/research-demo/actions.json \
+  --framework-snapshot /tmp/research-demo/framework.json \
   --output /tmp/research-replay
 ```
+
+Reuse the retained framework snapshot to prevent a later code or framework
+update from changing replay tool content. Earlier artifacts may lack this file;
+disclose that limitation when replaying them.
 
 ## Environment and role contract
 
@@ -330,7 +337,8 @@ cash, shares, corporate actions, terminal NAV and reward from recorded fill
 quantities and the frozen price tape; it does not validate optimal order sizing.
 
 For action replay, keep the original limits and pass `--strict-replay --scheduled`
-when those flags appear in `contract.json`. Run folders are ignored by Git;
+when those flags appear in `contract.json`. For new runs, also pass
+`--framework-snapshot /path/to/original/framework.json`. Run folders are ignored by Git;
 publish summaries with dataset limitations rather than third-party originals.
 
 ## Scope and evaluation

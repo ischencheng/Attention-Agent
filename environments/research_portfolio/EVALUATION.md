@@ -10,8 +10,8 @@ held-out policy improvement and investment skill are separate claims. The
 bundled synthetic transcript validates engineering behavior.
 
 The [experiment record](EXPERIMENTS.md) reports actual model attempts separately.
-The initial archived attempts failed at CLI launch and action-interface use;
-their zero account returns do not demonstrate a successful research policy.
+The first GPU episode failed after repeated reads and an output-token limit;
+its zero account return does not demonstrate a successful research policy.
 
 ## Episode contract
 
@@ -120,6 +120,7 @@ neither recommends an asset nor establishes coverage of the whole market.
 | Run artifact | What it establishes | What needs separate evidence |
 | --- | --- | --- |
 | `contract.json` | Scenario and implementation identity, action limits and fixed reward contract. | Generalization beyond the selected scenario. |
+| `framework.json` | Framework tool content frozen at environment construction and hashed in new-run contracts. | A retroactive snapshot for earlier runs that did not retain this file. |
 | `reset.json` | The public observation supplied at episode start. | Earlier information outside the archive. |
 | `trajectory.jsonl` | Executed actions, tool returns, state transitions, rejections, role and invocation links. | Truth of generated analysis or hidden model reasoning. |
 | `model-calls.json`, `model-calls/` | Invocation status, model identity, raw returned outputs and usage when reported. | Unreported token cost, latency or training statistics. |

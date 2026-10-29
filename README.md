@@ -18,10 +18,11 @@ inference adapter, an interactive trajectory viewer, and the production
 information pipeline that motivated its design. Model weight training and
 held-out investment performance are separate experiments.
 
-The first archived model attempts exposed an executable-path failure and then
-96 rejected actions with no completed research or positions. The
+The first GPU attempt reached one theme, then failed after repeated reads and
+an output-token limit. It produced no judgment or position. The
 [experiment record](environments/research_portfolio/EXPERIMENTS.md) keeps these
-outcomes alongside the model, runtime and data limits.
+outcomes and the earlier local failures alongside the model, runtime and data
+limits, with a [machine-readable result](environments/research_portfolio/results/2026-10-29-qwen14b-l40s-v1.json).
 
 ![Synthetic research replay with a time cutoff, evidence path and account ledger](docs/images/replay.png)
 
@@ -82,6 +83,7 @@ the financial outcome still comes from the account ledger.
 | Evidence | What to inspect |
 | --- | --- |
 | `episode.json`, `contract.json` | Frozen scenario, horizon, costs, action budgets and implementation hashes. |
+| `framework.json` | Framework tool snapshot retained and hashed for new runs. |
 | `trajectory.jsonl`, `actions.json` | Executed role actions, returned tool results, rejections and public observations. |
 | `model-calls/`, `model-calls.json` | Actual invocation identity, execution status and usage when available. |
 | `reconciliation.json` | Account arithmetic recomputed from recorded fills and the market tape. |
@@ -133,13 +135,19 @@ checkout contains the repair; blind attempts start from the exported baseline.
 
 ## Validate the environment
 
+Install the archive extra for calendar-bound admission checks and the full test
+suite. The synthetic demo above only requires the base package.
+
 ```bash
+python -m pip install -e '.[archive]'
 python -m unittest discover -s environments/research_portfolio/tests -v
 ```
 
 Tests cover temporal information boundaries, research gates, role scheduling,
 order execution, costs, corporate actions, failure handling and trace rendering.
 Adversarial cases change hidden future evidence and prices, attempt premature
-reads, and corrupt recorded account results. The independent reconciler checks
+reads, shift market-session timestamps, and corrupt recorded account results.
+Archive admission binds opens and closes to the pinned XNYS calendar; historical
+price revisions remain a separate data limitation. The independent reconciler checks
 account arithmetic; task difficulty, learned policy improvement and investment
 skill require their own evaluation runs.
