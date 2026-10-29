@@ -25,7 +25,84 @@ def rebalance(final_weight, *, initial_cash=1000, price_scale=1, split_ratio=Non
     return manifest, {"account": account, "reward": account["net_return"]}
 
 
+def fully_invested(*, initial_cash=10_000_000_000, price_scale=1, dividend=None):
+    manifest = fixture()
+    manifest["portfolio"].update(initial_cash=initial_cash, fee_bps=10, slippage_bps=5,
+                                  max_weight=1)
+    for bar in manifest["bars"]:
+        bar["open"] *= price_scale
+        bar["close"] *= price_scale
+    if dividend is not None:
+        manifest["corporate_actions"] = [{
+            "type": "dividend", "asset_id": "power", "amount_per_share": dividend,
+            "ex_at": manifest["bars"][2]["open_at"],
+            "pay_at": manifest["bars"][3]["open_at"],
+        }]
+    market = Market(manifest)
+    market.submit({"power": 1}, TIMES[0], ["fixture-thesis"])
+    account = market.advance(TIMES[-1])
+    return manifest, {"account": account, "reward": account["net_return"]}
+
+
 class ReconcileTests(unittest.TestCase):
+    def test_fully_invested_large_account_cash_roundoff(self):
+        manifest, summary = fully_invested()
+        self.assertEqual(summary["account"]["cash"], 0)
+        result = reconcile(manifest, summary)
+        # Retain the independent arithmetic; only its precision check changes.
+        self.assertEqual(result["recomputed_cash"], 3.328225e-7)
+        self.assertEqual(result["status"], "passed", result["errors"])
+
+    def test_full_investment_across_cash_and_price_scales(self):
+        residues = []
+        for cash in (1000, 10_000_000_000, 100_000_000_000, 1_000_000_000_000):
+            for price_scale in (0.001, 1, 1000):
+                with self.subTest(initial_cash=cash, price_scale=price_scale):
+                    manifest, summary = fully_invested(initial_cash=cash, price_scale=price_scale)
+                    self.assertEqual(summary["account"]["cash"], 0)
+                    result = reconcile(manifest, summary)
+                    residues.append(result["recomputed_cash"])
+                    self.assertEqual(result["status"], "passed", result["errors"])
+        self.assertTrue(any(value < 0 for value in residues))
+        self.assertTrue(any(value > 0 for value in residues))
+
+    def test_dividend_quantity_roundoff_reaches_cash(self):
+        for price_scale in (0.001, 1, 1000):
+            with self.subTest(price_scale=price_scale):
+                manifest, summary = fully_invested(price_scale=price_scale, dividend=1.23456789)
+                self.assertGreater(summary["account"]["cash"], 0)
+                self.assertEqual(summary["account"]["receivables"], {})
+                result = reconcile(manifest, summary)
+                self.assertEqual(result["status"], "passed", result["errors"])
+                changed = copy.deepcopy(summary)
+                changed["account"]["cash"] += 0.01
+                result = reconcile(manifest, changed)
+                self.assertTrue(any(error.startswith("final cash:") for error in result["errors"]))
+
+    def test_cash_tampering_outside_fill_precision_fails(self):
+        for cash, discrepancy in ((1000, 1e-9), (10_000_000_000, 0.01)):
+            for target in ("fill", "final"):
+                with self.subTest(initial_cash=cash, target=target):
+                    manifest, summary = fully_invested(initial_cash=cash)
+                    if target == "fill":
+                        fill = next(item for item in summary["account"]["ledger"] if item["type"] == "fill")
+                        fill["cash_after"] += discrepancy
+                        label = "cash after fill:"
+                    else:
+                        summary["account"]["cash"] += discrepancy
+                        label = "final cash:"
+                    result = reconcile(manifest, summary)
+                    self.assertEqual(result["status"], "failed")
+                    self.assertTrue(any(error.startswith(label) for error in result["errors"]))
+
+    def test_negative_cash_outside_fill_precision_fails(self):
+        manifest, summary = fully_invested()
+        fill = next(item for item in summary["account"]["ledger"] if item["type"] == "fill")
+        fill["quantity"] += 0.01
+        result = reconcile(manifest, summary)
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("negative cash or shares", result["errors"])
+
     def test_fractional_partial_reduction_then_full_exit(self):
         manifest, summary = rebalance(0)
         self.assertEqual(summary["account"]["positions"], {})

@@ -10,8 +10,8 @@ import math
 from .scenario import timestamp
 
 
-def _quantity_roundoff(value):
-    # Market records Decimal quantities as JSON floats. One float ULP bounds
+def _serialization_roundoff(value):
+    # Market records Decimal values as JSON floats. One float ULP bounds
     # both Decimal-to-float rounding and the shortest-decimal JSON round trip.
     return Decimal.from_float(math.ulp(float(value)))
 
@@ -21,6 +21,7 @@ def reconcile(manifest, summary):
     initial = number(manifest["portfolio"]["initial_cash"])
     cash, positions, receivables = initial, {}, {}
     quantity_errors = {}
+    cash_error, receivable_errors = Decimal(0), {}
     terminal = timestamp(manifest["timeline"][-1])
     events, errors = [], []
     fills = [item for item in summary["account"]["ledger"] if item["type"] == "fill"]
@@ -40,8 +41,8 @@ def reconcile(manifest, summary):
         if not math.isclose(float(actual), float(expected), rel_tol=1e-9, abs_tol=1e-7):
             errors.append(f"{label}: recorded {actual}, recomputed {expected}")
 
-    def check_quantity(label, actual, expected, error_bound):
-        if abs(number(actual) - expected) > error_bound + _quantity_roundoff(actual):
+    def check_serialized(label, actual, expected, error_bound):
+        if abs(number(actual) - expected) > error_bound + _serialization_roundoff(actual):
             errors.append(f"{label}: recorded {actual}, recomputed {expected}")
             return False
         return True
@@ -57,9 +58,12 @@ def reconcile(manifest, summary):
             positions[asset] = quantity * ratio
             quantity_errors[asset] = quantity_errors.get(asset, Decimal(0)) * ratio
         elif kind == "dividend_ex":
-            receivables[index] = quantity * number(item["amount_per_share"])
+            amount = number(item["amount_per_share"])
+            receivables[index] = quantity * amount
+            receivable_errors[index] = quantity_errors.get(asset, Decimal(0)) * amount
         elif kind == "dividend_pay":
             cash += receivables.pop(index, Decimal(0))
+            cash_error += receivable_errors.pop(index, Decimal(0))
         else:
             bar = next((bar for bar in manifest["bars"] if bar["asset_id"] == asset
                         and timestamp(bar["open_at"]) == at), None)
@@ -71,14 +75,19 @@ def reconcile(manifest, summary):
                 errors.append("invalid fill side or quantity")
             slip = number(manifest["portfolio"]["slippage_bps"]) / 10000
             price = number(bar["open"]) * (1 + slip if signed > 0 else 1 - slip)
-            fee = abs(signed) * price * number(manifest["portfolio"]["fee_bps"]) / 10000
+            fee_rate = number(manifest["portfolio"]["fee_bps"]) / 10000
+            fee = abs(signed) * price * fee_rate
             cash += -signed * price - fee
+            fill_error = _serialization_roundoff(item["quantity"])
+            # Propagate quantity serialization through the net cash per share;
+            # buying pays fees and selling deducts fees from the proceeds.
+            cash_error += fill_error * price * (1 + fee_rate if signed > 0 else 1 - fee_rate)
             positions[asset] = quantity + signed
-            quantity_errors[asset] = quantity_errors.get(asset, Decimal(0)) + _quantity_roundoff(item["quantity"])
+            quantity_errors[asset] = quantity_errors.get(asset, Decimal(0)) + fill_error
             check("execution price", item["execution_price"], price)
             check("fee", item["fee"], fee)
-            check("cash after fill", item["cash_after"], cash)
-            if check_quantity("quantity after fill", item["quantity_after"], positions[asset], quantity_errors[asset]):
+            check_serialized("cash after fill", item["cash_after"], cash, cash_error)
+            if check_serialized("quantity after fill", item["quantity_after"], positions[asset], quantity_errors[asset]):
                 recorded = number(item["quantity_after"])
                 if recorded == 0 and abs(positions[asset]) <= quantity_errors[asset]:
                     # A verified exit starts a fresh zero checkpoint, so old
@@ -88,12 +97,12 @@ def reconcile(manifest, summary):
                     # A checked checkpoint can narrow, never expand, the fill
                     # arithmetic's uncertainty. This preserves small residual
                     # holdings after a nearly complete reduction as well.
-                    rounding = _quantity_roundoff(item["quantity_after"])
+                    rounding = _serialization_roundoff(item["quantity_after"])
                     lower = max(positions[asset] - quantity_errors[asset], recorded - rounding)
                     upper = min(positions[asset] + quantity_errors[asset], recorded + rounding)
                     positions[asset] = (lower + upper) / 2
                     quantity_errors[asset] = (upper - lower) / 2
-            if cash < Decimal("-0.0000001") or positions[asset] < -quantity_errors[asset]:
+            if cash < -cash_error or positions[asset] < -quantity_errors[asset]:
                 errors.append("negative cash or shares")
     values = {}
     for asset, quantity in positions.items():
@@ -105,14 +114,14 @@ def reconcile(manifest, summary):
                     if bar["asset_id"] == asset and timestamp(bar["close_at"]) == terminal)
         values[asset] = quantity * number(mark)
         actual = summary["account"]["positions"].get(asset, {})
-        check_quantity("final quantity " + asset, actual.get("quantity", 0), quantity, quantity_errors[asset])
+        check_serialized("final quantity " + asset, actual.get("quantity", 0), quantity, quantity_errors[asset])
         check("final mark " + asset, actual.get("mark_price", 0), mark)
     expected_assets = set(values)
     if set(summary["account"]["positions"]) != expected_assets:
         errors.append("final position set differs")
     nav = cash + sum(values.values()) + sum(receivables.values())
     reward = nav / initial - 1
-    check("final cash", summary["account"]["cash"], cash)
+    check_serialized("final cash", summary["account"]["cash"], cash, cash_error)
     check("final receivables", sum(item["amount"] for item in summary["account"]["receivables"].values()), sum(receivables.values()))
     check("terminal NAV", summary["account"]["nav"], nav)
     check("terminal reward", summary["reward"], reward)
