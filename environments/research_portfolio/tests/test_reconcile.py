@@ -64,7 +64,7 @@ class ReconcileTests(unittest.TestCase):
 
     def test_retained_position_cannot_be_omitted(self):
         for cash, price_scale in ((1000, 1), (10_000_000, 1), (100_000_000_000, 0.001)):
-            for target in (0.01, 1e-10):
+            for target in (0.01, 1e-10, 1e-20):
                 with self.subTest(initial_cash=cash, price_scale=price_scale, target_weight=target):
                     manifest, summary = rebalance(target, initial_cash=cash, price_scale=price_scale)
                     position = summary["account"]["positions"]["power"]

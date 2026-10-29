@@ -43,6 +43,8 @@ def reconcile(manifest, summary):
     def check_quantity(label, actual, expected, error_bound):
         if abs(number(actual) - expected) > error_bound + _quantity_roundoff(actual):
             errors.append(f"{label}: recorded {actual}, recomputed {expected}")
+            return False
+        return True
 
     for at, _, index, kind, item in sorted(events):
         if at > terminal:
@@ -76,14 +78,23 @@ def reconcile(manifest, summary):
             check("execution price", item["execution_price"], price)
             check("fee", item["fee"], fee)
             check("cash after fill", item["cash_after"], cash)
-            check_quantity("quantity after fill", item["quantity_after"], positions[asset], quantity_errors[asset])
+            if check_quantity("quantity after fill", item["quantity_after"], positions[asset], quantity_errors[asset]):
+                recorded = number(item["quantity_after"])
+                if recorded == 0 and abs(positions[asset]) <= quantity_errors[asset]:
+                    # A verified exit starts a fresh zero checkpoint, so old
+                    # large fills cannot erase a later tiny buy.
+                    positions[asset] = quantity_errors[asset] = Decimal(0)
+                else:
+                    # A checked checkpoint can narrow, never expand, the fill
+                    # arithmetic's uncertainty. This preserves small residual
+                    # holdings after a nearly complete reduction as well.
+                    rounding = _quantity_roundoff(item["quantity_after"])
+                    lower = max(positions[asset] - quantity_errors[asset], recorded - rounding)
+                    upper = min(positions[asset] + quantity_errors[asset], recorded + rounding)
+                    positions[asset] = (lower + upper) / 2
+                    quantity_errors[asset] = (upper - lower) / 2
             if cash < Decimal("-0.0000001") or positions[asset] < -quantity_errors[asset]:
                 errors.append("negative cash or shares")
-            if number(item["quantity_after"]) == 0 and abs(positions[asset]) <= quantity_errors[asset]:
-                # A verified full exit is a fresh zero checkpoint. Prior large
-                # fills must not erase a later, independently recorded tiny buy.
-                positions[asset] = Decimal(0)
-                quantity_errors[asset] = Decimal(0)
     values = {}
     for asset, quantity in positions.items():
         # Accumulate the serialization uncertainty at each fill's own scale;
