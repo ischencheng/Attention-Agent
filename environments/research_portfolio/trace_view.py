@@ -494,7 +494,7 @@ _SCRIPT = r"""
       [['Published', source.published_at], ['Available', source.available_at]].forEach(([label, value]) => metadata.append(node('dt', label), node('dd', value)));
       row.append(metadata); sources.append(row);
     });
-    document.getElementById('source-count').textContent = `${snapshot.sources.length} arrived originals`;
+    document.getElementById('source-count').textContent = `${snapshot.sources.length} captured arrivals`;
     updateChart(limit);
     filter();
   }
@@ -700,7 +700,7 @@ def render_trace(summary: dict, trajectory: list[dict]) -> str:
             + stage_buttons + '</div><p class="subtle">Fast → Mid → Strong → broker. Counts describe recorded transitions, including rejected attempts.</p></section>'
             + '<div class="two-col"><section class="panel"><div class="panel-title"><h2>Paper account value</h2><p>Recorded NAV · cash + marked positions</p></div>' + _chart(trajectory)
             + '<h3>Positions at this transition</h3><div id="view-positions">' + _positions(_mapping(_observation(trajectory[-1]).get("account")) if trajectory else {}) + '</div></section>'
-            + '<section class="panel"><div class="panel-title"><h2>Source arrivals</h2><p id="source-count">' + str(len(latest["sources"])) + ' arrived originals</p></div>'
+            + '<section class="panel"><div class="panel-title"><h2>Source arrivals</h2><p id="source-count">' + str(len(latest["sources"])) + ' captured arrivals</p></div>'
             + '<p class="subtle">Publication and availability times stay attached to each original. Select a title to follow its references in the trace.</p><div class="source-list" id="view-sources">'
             + _source_list(latest["sources"]) + '</div></section></div>'
             + '<section class="panel" aria-labelledby="integrity-title"><div class="panel-title"><h2 id="integrity-title">Data &amp; policy integrity</h2><p>Run-level provenance · explicit verification status</p></div>'
