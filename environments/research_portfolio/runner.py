@@ -11,7 +11,8 @@ import time
 from agent.role_policy import role_rules
 
 from .env import ResearchPortfolioEnv
-from .scenario import json_copy
+from .scenario import json_copy, load_manifest
+from .archive import build_archive, digest, replay_integrity
 from .trace_view import render_trace
 from .reconcile import reconcile
 
@@ -26,6 +27,38 @@ class InvalidPolicyOutput(ValueError):
     def __init__(self, message, invocation):
         super().__init__(message)
         self.invocation = invocation
+
+
+def policy_observation(observation):
+    """Keep durable research state and receipts, delivering each new read once.
+
+    Originals remain available through explicit reads. Repeating every full
+    article in both global read state, tool history and feedback makes context
+    grow with duplicate arrivals rather than research. This projection never
+    summarizes, truncates or alters a newly returned original.
+    """
+    visible = deepcopy(observation)
+    feedback = visible.get("execution_feedback", [])
+    current_tools = {item.get("result", {}).get("result", {}).get("tool_call_id")
+                     for item in feedback}
+    visible["read_sources"] = [{key: value for key, value in source.items() if key != "body"}
+                               for source in visible.get("read_sources", [])]
+    for receipt in visible.get("tool_results", []):
+        if receipt.get("tool") == "read" and receipt.get("tool_call_id") not in current_tools:
+            receipt["result"].pop("body", None)
+            receipt["body_in_context"] = False
+    for item in feedback:
+        receipt = item.get("result", {}).get("result", {})
+        if receipt.get("tool") == "read":
+            receipt = deepcopy(receipt)
+            item["result"]["result"] = receipt
+            receipt.get("result", {}).pop("body", None)
+            receipt["body_location"] = "tool_results entry with this tool_call_id"
+    visible["retrieval_memory"] = (
+        "read_sources is an index. New original bodies are delivered in tool_results for the previous batch. "
+        "Older read receipts retain IDs and metadata; use read again to retrieve their full original. "
+        "Themes, facts, questions and judgments remain durable. Repeated source arrivals still require routing by their own ID.")
+    return visible
 
 
 class CodexPolicy:
@@ -60,7 +93,7 @@ class CodexPolicy:
         model = self.model or ("gpt-6.1-sol" if role == "strong" else "gpt-6-luna")
         # Public observation is the sole model input. No scenario path, future tape,
         # broker or database environment is passed into the policy process.
-        visible = deepcopy(observation)
+        visible = policy_observation(observation)
         prompt = (
             f"You are the {role} role in Attention Proxy's research-to-portfolio environment. "
             + role_rules(role) + " " +
@@ -159,8 +192,22 @@ class CodexPolicy:
 def run_episode(manifest, output, *, actions=None, codex=False, model=None,
                 max_calls=24, timeout=120, max_steps=512, actions_per_cutoff=64,
                 policy_runner=None, codex_bin="codex", strict_replay=False,
-                scheduled=False, archive_contract=None, model_endpoint=None, policy_manifest=None):
-    env = ResearchPortfolioEnv(manifest, max_steps=max_steps, actions_per_cutoff=actions_per_cutoff,
+                scheduled=False, archive_bundle=None, model_endpoint=None, policy_manifest=None):
+    base_manifest = load_manifest(manifest)
+    if archive_bundle is not None:
+        archive_bundle = json_copy(archive_bundle)
+        required = {"manifest", "contract", "sources", "market", "policy_manifest"}
+        if (not isinstance(archive_bundle, dict) or set(archive_bundle) != required
+                or not isinstance(archive_bundle["contract"], dict) or "spec" not in archive_bundle["contract"]):
+            raise ValueError("a full validated archive bundle is required")
+        rebuilt = build_archive(archive_bundle["contract"]["spec"], archive_bundle["sources"],
+                                archive_bundle["market"], archive_bundle["policy_manifest"])
+        if rebuilt != archive_bundle or base_manifest != rebuilt["manifest"]:
+            raise ValueError("archive bundle differs from its validated contract or supplied episode")
+        if policy_manifest is not None and policy_manifest != rebuilt["policy_manifest"]:
+            raise ValueError("policy identities differ from the retained archive")
+        policy_manifest = deepcopy(rebuilt["policy_manifest"])
+    env = ResearchPortfolioEnv(base_manifest, max_steps=max_steps, actions_per_cutoff=actions_per_cutoff,
                                strict_replay=strict_replay, scheduled=scheduled)
     if actions is not None:
         actions = json_copy(actions)
@@ -172,17 +219,31 @@ def run_episode(manifest, output, *, actions=None, codex=False, model=None,
     if codex == (actions is not None):
         raise ValueError("Select exactly one of Codex or a supplied action transcript")
     output.mkdir(parents=True, exist_ok=True)
+    if archive_bundle is not None:
+        # Keep the complete admitted evidence independently readable even if the
+        # original dataset directory moves. It is never placed in model prompts.
+        archive_dir = output / "archive"
+        archive_dir.mkdir()
+        for filename, key in (("episode.json", "manifest"), ("sources.json", "sources"),
+                              ("market.json", "market"), ("policy-manifest.json", "policy_manifest"),
+                              ("archive-contract.json", "contract")):
+            write_json(archive_dir / filename, archive_bundle[key])
     episode = deepcopy(env.manifest)
     write_json(output / "episode.json", episode)
+    implementation_files = ("env.py", "market.py", "scenario.py", "runner.py", "clock.py", "reconcile.py",
+                            "archive.py", "collector.py", "experiment.py", "local_model.py", "model_server.py")
+    if (Path(__file__).parent / "modal_policy.py").is_file():
+        implementation_files += ("modal_policy.py",)
     write_json(output / "contract.json", {
         "scenario_sha256": hashlib.sha256(json.dumps(episode, sort_keys=True, ensure_ascii=False,
                                                      allow_nan=False).encode()).hexdigest(),
         "reward_contract": "terminal_net_portfolio_return_v1",
+        "archive_path": "archive" if archive_bundle is not None else None,
+        "archive_contract_sha256": digest(archive_bundle["contract"]) if archive_bundle is not None else None,
         "max_steps": max_steps, "actions_per_cutoff": actions_per_cutoff,
         "strict_replay": strict_replay, "scheduled": scheduled,
         "implementation_sha256": {name: hashlib.sha256((Path(__file__).parent / name).read_bytes()).hexdigest()
-                                  for name in ("env.py", "market.py", "scenario.py", "runner.py", "clock.py", "reconcile.py",
-                                               "archive.py", "local_model.py", "model_server.py")},
+                                  for name in implementation_files},
         "shared_role_rules_sha256": hashlib.sha256((Path(__file__).parents[2] / "agent" / "role_policy.py").read_bytes()).hexdigest(),
         "codex_adapter_sha256": hashlib.sha256((Path(__file__).parents[2] / "agent" / "codex_runner.py").read_bytes()).hexdigest(),
     })
@@ -307,9 +368,9 @@ def run_episode(manifest, output, *, actions=None, codex=False, model=None,
     summary["policy_outcome"] = (
         "failed" if error else "rejected_actions_only" if model_steps and all("rejection" in record["result"] for record in model_steps)
         else "budget_exhausted" if summary["policy_budget_exhausted"] else "finished")
-    if archive_contract is not None:
-        summary["replay_integrity"] = deepcopy(archive_contract)
-        write_json(output / "archive-contract.json", archive_contract)
+    if archive_bundle is not None:
+        summary["replay_integrity"] = replay_integrity(archive_bundle["contract"])
+        summary["archive_contract_sha256"] = digest(archive_bundle["contract"])
         summary["replay_integrity"]["model_files_verified"] = bool(policy and policy.calls and all(
             call.get("model_binding", {}).get("model_files_verified") is True for call in policy.calls))
         summary["evaluation_eligible"] &= summary["replay_integrity"].get("benchmark_eligible") is True

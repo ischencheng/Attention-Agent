@@ -1,4 +1,4 @@
-"""Small Responses/SSE bridge for the pinned local MLX policy used by Codex.
+"""Loopback Responses/SSE bridge for pinned policy backends used by Codex.
 
 Only text, tool-disabled, stateless requests are supported. The bridge does not
 execute environment actions or repair model output. Codex validates the final
@@ -7,6 +7,7 @@ JSON schema. This is inference instrumentation, not an RL trainer.
 from __future__ import annotations
 
 import argparse
+from contextlib import nullcontext
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import importlib.metadata
@@ -27,9 +28,9 @@ def write_json(path, value):
     Path(path).write_text(json.dumps(value, ensure_ascii=False, indent=2, allow_nan=False) + "\n")
 
 
-def request_messages(body):
+def request_messages(body, served_model=SERVED_MODEL):
     """Translate only supported text messages; never silently drop tool state."""
-    if not isinstance(body, dict) or body.get("model") != SERVED_MODEL:
+    if not isinstance(body, dict) or body.get("model") != served_model:
         raise ValueError("request must select the exact pinned served model")
     if body.get("tools") or body.get("previous_response_id") or body.get("conversation"):
         raise ValueError("only tool-disabled stateless requests are supported")
@@ -85,6 +86,7 @@ class MLXBackend:
     """Load only the verified local snapshot; one request owns the model at once."""
 
     def __init__(self, snapshot, *, max_input_tokens=24000, max_output_tokens=1536, seed=0):
+        self.served_model = SERVED_MODEL
         self.manifest = verify_snapshot(snapshot)
         if type(max_input_tokens) is not int or not 1 <= max_input_tokens <= 30000:
             raise ValueError("max_input_tokens must be between 1 and 30000")
@@ -109,7 +111,7 @@ class MLXBackend:
                          "packages": {name: importlib.metadata.version(name)
                                       for name in ("mlx", "mlx-lm", "transformers")}}
 
-    def generate(self, messages, max_tokens, *, on_progress=None):
+    def generate(self, messages, max_tokens, *, on_progress=None, schema=None):
         import mlx.core as mx
         from mlx_lm import stream_generate
         from mlx_lm.sample_utils import make_sampler
@@ -141,7 +143,8 @@ class ResponseServer(ThreadingHTTPServer):
             raise ValueError("model server audit directory must be empty")
         self.generation_lock = threading.Lock()
         self.request_count, self.max_requests = 0, max_requests
-        self.server_manifest = {"served_model": SERVED_MODEL, "policy_manifest": backend.manifest,
+        self.served_model = getattr(backend, "served_model", SERVED_MODEL)
+        self.server_manifest = {"served_model": self.served_model, "policy_manifest": backend.manifest,
                                 "policy_manifest_sha256": manifest_sha256(backend.manifest),
                                 "runtime": backend.metadata}
         write_json(self.audit_dir / "model-manifest.json", self.server_manifest)
@@ -175,7 +178,7 @@ class ResponseHandler(BaseHTTPRequestHandler):
             return self._json(200, {**self.server.server_manifest, "request_count": self.server.request_count,
                                     "max_requests": self.server.max_requests})
         if self.path == "/v1/models":
-            return self._json(200, {"object": "list", "data": [{"id": SERVED_MODEL, "object": "model"}]})
+            return self._json(200, {"object": "list", "data": [{"id": self.server.served_model, "object": "model"}]})
         return self._json(404, {"error": {"message": "unknown route"}})
 
     def do_POST(self):
@@ -191,7 +194,7 @@ class ResponseHandler(BaseHTTPRequestHandler):
                 raise ValueError("application/json is required")
             body = json.loads(self.rfile.read(length))
             json.dumps(body, allow_nan=False)
-            messages = request_messages(body)
+            messages = request_messages(body, self.server.served_model)
             max_tokens = body.get("max_output_tokens", self.server.backend.max_output_tokens)
             if type(max_tokens) is not int or max_tokens < 1:
                 raise ValueError("max_output_tokens must be a positive integer")
@@ -215,7 +218,7 @@ class ResponseHandler(BaseHTTPRequestHandler):
         write_json(call_dir / "request.json", body)
         write_json(call_dir / "messages.json", messages)
         response = {"id": response_id, "object": "response", "created_at": int(time.time()),
-                    "model": SERVED_MODEL, "status": "in_progress", "output": [],
+                    "model": self.server.served_model, "status": "in_progress", "output": [],
                     "error": None, "incomplete_details": None, "usage": None}
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
@@ -251,7 +254,8 @@ class ResponseHandler(BaseHTTPRequestHandler):
             emit("response.output_item.added", output_index=0, item=item)
             emit("response.content_part.added", item_id=item_id, output_index=0, content_index=0,
                  part={"type": "output_text", "text": "", "annotations": [], "logprobs": []})
-            for last in self.server.backend.generate(messages, max_tokens, on_progress=keepalive):
+            schema = body.get("text", {}).get("format", {}).get("schema")
+            for last in self.server.backend.generate(messages, max_tokens, on_progress=keepalive, schema=schema):
                 text += last.text
                 token_ids.append(last.token_id)
                 if last.text:
@@ -283,7 +287,7 @@ class ResponseHandler(BaseHTTPRequestHandler):
                 pass
         finally:
             write_json(call_dir / "generation.json", {
-                "response_id": response_id, "served_model": SERVED_MODEL,
+                "response_id": response_id, "served_model": self.server.served_model,
                 "policy_manifest_sha256": self.server.server_manifest["policy_manifest_sha256"],
                 "text": text, "generated_token_ids": token_ids,
                 "logprobs": None, "training_performed": False,
@@ -296,6 +300,7 @@ class ResponseHandler(BaseHTTPRequestHandler):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--backend", choices=("modal", "mlx"), default="modal")
     parser.add_argument("--snapshot", type=Path, default=default_snapshot())
     parser.add_argument("--port", type=int, default=0)
     parser.add_argument("--audit-dir", type=Path, required=True)
@@ -303,18 +308,24 @@ def main():
     parser.add_argument("--max-output-tokens", type=int, default=1536)
     parser.add_argument("--max-requests", type=int, default=64)
     args = parser.parse_args()
-    backend = MLXBackend(args.snapshot, max_input_tokens=args.max_input_tokens,
-                         max_output_tokens=args.max_output_tokens)
-    server = ResponseServer(("127.0.0.1", args.port), backend, args.audit_dir,
-                            max_requests=args.max_requests)
-    endpoint = f"http://127.0.0.1:{server.server_port}"
-    write_json(args.audit_dir / "server.json", {"base_url": endpoint + "/v1", "pid": os.getpid(),
-                                                **server.server_manifest})
-    print(json.dumps({"base_url": endpoint + "/v1", "served_model": SERVED_MODEL}), flush=True)
-    try:
-        server.serve_forever()
-    finally:
-        server.server_close()
+    if args.backend == "modal":
+        from .modal_policy import remote_backend
+        context = remote_backend(max_input_tokens=args.max_input_tokens,
+                                 max_output_tokens=args.max_output_tokens, max_requests=args.max_requests)
+    else:
+        context = nullcontext(MLXBackend(args.snapshot, max_input_tokens=args.max_input_tokens,
+                                        max_output_tokens=args.max_output_tokens))
+    with context as backend:
+        server = ResponseServer(("127.0.0.1", args.port), backend, args.audit_dir,
+                                max_requests=args.max_requests)
+        endpoint = f"http://127.0.0.1:{server.server_port}"
+        write_json(args.audit_dir / "server.json", {"base_url": endpoint + "/v1", "pid": os.getpid(),
+                                                    **server.server_manifest})
+        print(json.dumps({"base_url": endpoint + "/v1", "served_model": server.served_model}), flush=True)
+        try:
+            server.serve_forever()
+        finally:
+            server.server_close()
 
 
 if __name__ == "__main__":

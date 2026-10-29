@@ -112,15 +112,22 @@ def verify_server_identity(base_url, expected_manifest, *, timeout=5):
         raise ValueError("oversized model identity response")
     health = json.loads(payload)
     expected_hash = manifest_sha256(expected_manifest)
-    if (health.get("served_model") != SERVED_MODEL or
+    expected_model = expected_manifest.get("served_model", SERVED_MODEL)
+    if (health.get("served_model") != expected_model or
             health.get("policy_manifest") != expected_manifest or
             health.get("policy_manifest_sha256") != expected_hash):
         raise ValueError("served model identity differs from the archived policy manifest")
     runtime = health.get("runtime", {})
-    if runtime.get("backend") != "mlx" or runtime.get("enable_thinking") is not False or runtime.get("concurrency") != 1:
-        raise ValueError("model runtime does not satisfy the declared local policy contract")
-    return {"base_url": base_url, "served_model": SERVED_MODEL,
+    if runtime.get("backend") not in {"mlx", "vllm"} or runtime.get("enable_thinking") is not False or runtime.get("concurrency") != 1:
+        raise ValueError("model runtime does not satisfy the declared policy contract")
+    if runtime["backend"] == "vllm" and (runtime.get("model_files_verified") is not True
+                                            or not runtime.get("gpu")):
+        raise ValueError("remote model runtime requires verified artifacts and GPU identity")
+    verification = ("Trusted remote GPU worker verifies artifact bytes before loading; the authenticated bridge checks the full identity for every invocation. This is not hardware attestation."
+                    if runtime["backend"] == "vllm" else
+                    "Trusted local bridge verifies artifact bytes at startup; identity is checked for every invocation, not remote attestation.")
+    return {"base_url": base_url, "served_model": expected_model,
             "policy_manifest_sha256": expected_hash, "runtime": runtime,
             "model_files_verified": True,
-            "verification_scope": "Trusted local bridge verifies artifact bytes at startup; identity is checked for every invocation, not remote attestation.",
+            "verification_scope": verification,
             "request_count": health.get("request_count"), "max_requests": health.get("max_requests")}

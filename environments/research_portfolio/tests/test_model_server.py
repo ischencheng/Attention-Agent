@@ -20,7 +20,7 @@ class StubBackend:
         self.finish = "stop"
         self.fail = False
 
-    def generate(self, messages, max_tokens, *, on_progress=None):
+    def generate(self, messages, max_tokens, *, on_progress=None, schema=None):
         self.calls.append((messages, max_tokens))
         if self.fail:
             raise RuntimeError("test generation failure")
@@ -48,6 +48,12 @@ class MessageContractTests(unittest.TestCase):
         for change in changes:
             with self.subTest(change=change), self.assertRaises(ValueError):
                 request_messages({**valid, **change})
+
+    def test_remote_alias_is_bound_to_the_selected_backend(self):
+        body = {"model": "pinned-remote", "stream": True, "input": "visible"}
+        self.assertEqual(request_messages(body, "pinned-remote")[-1]["content"], "visible")
+        with self.assertRaisesRegex(ValueError, "exact pinned"):
+            request_messages(body)
 
 
 class ServerProtocolTests(unittest.TestCase):

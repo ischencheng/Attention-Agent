@@ -63,6 +63,23 @@ class LocalModelTests(unittest.TestCase):
                 with self.subTest(change=change), self.assertRaises(ValueError):
                     local_model.verify_server_identity("http://127.0.0.1:123/v1", manifest)
 
+    def test_remote_identity_requires_actual_gpu_and_verified_model_files(self):
+        manifest = {**local_model.policy_manifest(), "served_model": "pinned-remote-model"}
+        runtime = {"backend": "vllm", "gpu": "NVIDIA L40S", "model_files_verified": True,
+                   "enable_thinking": False, "concurrency": 1}
+        health = {"served_model": manifest["served_model"], "policy_manifest": manifest,
+                  "policy_manifest_sha256": local_model.manifest_sha256(manifest), "runtime": runtime}
+        opener = Mock()
+        with patch.object(local_model, "build_opener", return_value=opener):
+            opener.open.return_value = io.BytesIO(json.dumps(health).encode())
+            result = local_model.verify_server_identity("http://127.0.0.1:123/v1", manifest)
+            self.assertEqual(result["served_model"], "pinned-remote-model")
+            self.assertIn("remote GPU", result["verification_scope"])
+            for change in ({"gpu": None}, {"model_files_verified": False}):
+                opener.open.return_value = io.BytesIO(json.dumps({**health, "runtime": {**runtime, **change}}).encode())
+                with self.assertRaisesRegex(ValueError, "verified artifacts and GPU identity"):
+                    local_model.verify_server_identity("http://127.0.0.1:123/v1", manifest)
+
 
 if __name__ == "__main__":
     unittest.main()

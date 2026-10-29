@@ -4,7 +4,7 @@ import tempfile
 import unittest
 
 from environments.research_portfolio.demo import demo_actions
-from environments.research_portfolio.runner import CodexPolicy, run_episode
+from environments.research_portfolio.runner import CodexPolicy, run_episode, policy_observation
 
 
 FIXTURE = Path(__file__).parents[1] / "fixtures" / "demo.json"
@@ -15,6 +15,19 @@ class RunnerTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
         self.addCleanup(self.temp.cleanup)
+
+    def test_policy_memory_delivers_new_original_once_and_preserves_read_receipts(self):
+        old = {"tool_call_id": "tool-1", "tool": "read", "result": {"id": "one", "body": "old original"}}
+        new = {"tool_call_id": "tool-2", "tool": "read", "result": {"id": "two", "body": "new original"}}
+        observation = {"read_sources": [old["result"], new["result"]], "tool_results": [old, new],
+                       "execution_feedback": [{"result": {"result": new}}],
+                       "themes": [{"facts": [{"source_id": "one", "claim": "attributed fact"}]}]}
+        projected = policy_observation(observation)
+        self.assertEqual(json.dumps(projected).count("new original"), 1)
+        self.assertNotIn("old original", json.dumps(projected))
+        self.assertEqual(projected["tool_results"][0]["result"]["id"], "one")
+        self.assertEqual(projected["themes"], observation["themes"])
+        self.assertEqual(observation["tool_results"][0]["result"]["body"], "old original")
 
     def test_complete_workflow_replays_with_the_same_loss_and_provenance(self):
         first = run_episode(FIXTURE, self.root / "first", actions=demo_actions())
