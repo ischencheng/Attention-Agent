@@ -76,8 +76,13 @@ setup; they do not provide remote attestation.
 ## Archive and financial scope
 
 The frozen episode spans **October 23, 2026 at 00:00 UTC through October 26 at
-20:00 UTC**, with 27 captured source arrivals. The archive uses actual production
-receipt times and verifies content hashes. Its contract records that the
+20:00 UTC**, with **27 captured arrival versions across 10 source-native event
+IDs** from NVIDIA and OpenAI. There are 26 distinct body values, and 18 arrival
+versions share one Kazakhstan-related title. This is a small, duplicate-heavy
+capture; distinct event IDs do not certify independent causal evidence.
+
+The archive uses actual production receipt times and verifies content hashes.
+Its contract records that the
 interval and instrument-coverage selection were frozen before requesting price
 values or examining returns.
 

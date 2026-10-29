@@ -245,10 +245,14 @@ class ResearchPortfolioEnv:
         self.trajectory.append(copy.deepcopy(record))
         return observation, reward, self.terminated, self.truncated, copy.deepcopy(info)
 
-    def _advance(self):
+    def _advance(self, *, acknowledge_strong=False):
         if self._strong_active:
-            self._strong_seen = self._theme_version()
-            self._last_strong_at = self.now
+            # A cutoff budget can interrupt a successful read or open question.
+            # Only an explicit wait acknowledges this cycle; otherwise evidence
+            # remains pending for the next scheduled Strong tick.
+            if acknowledge_strong:
+                self._strong_seen = self._theme_version()
+                self._last_strong_at = self.now
             self._strong_active = False
         if self.scheduled and self.index + 1 < len(self.manifest["timeline"]):
             following = timestamp(self.manifest["timeline"][self.index + 1])
@@ -315,7 +319,7 @@ class ResearchPortfolioEnv:
             if kind == "wait":
                 if activate_strong:
                     self._strong_active = True
-                self._advance()
+                self._advance(acknowledge_strong=True)
                 return {"status": "waited", "reason": reason}
             if kind == "stop":
                 self._finish("stop", truncated=False)

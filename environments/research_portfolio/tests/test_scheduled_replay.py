@@ -159,6 +159,45 @@ class ScheduledReplayTests(unittest.TestCase):
                 self.assertEqual(env.now, "2025-06-02T20:40:00+00:00")
                 self.assertEqual(env.observation()["suggested_role"], "strong")
 
+    def test_forced_budget_advance_keeps_unfinished_strong_research_pending(self):
+        for cap in (4, 5):
+            with self.subTest(actions_per_cutoff=cap):
+                env = ResearchPortfolioEnv(fixture(), strict_replay=True, scheduled=True,
+                                           actions_per_cutoff=cap)
+                steps = [
+                    {"type": "triage", "role": "fast", "source_id": "earnings",
+                     "disposition": "advance", "reason": "An official clue"},
+                    {"type": "tool", "role": "mid", "tool": "read", "args": {"source_id": "earnings"}},
+                    {"type": "accumulate", "role": "mid", "theme_id": "power",
+                     "ticket_ids": ["ticket-earnings"], "summary": "Power results",
+                     "facts": [{"source_id": "earnings", "claim": "Revenue rose"}],
+                     "open_questions": ["Is growth durable?"], "authoritative_exception": True,
+                     "exception_reason": "Official filing"},
+                    action("open_research", question_id="capacity", theme_id="power", question="Is growth durable?"),
+                    tool("read", source_id="earnings"),
+                ]
+                for item in steps[:cap]:
+                    self.assertNotIn("rejection", env.step(item)[4])
+                self.assertEqual(env.now, "2025-06-02T20:30:00+00:00")
+                self.assertIn("capacity", env.questions)
+                self.assertFalse(env.theses)
+                self.assertIsNone(env.observation()["suggested_role"])
+                env.step(action("wait", reason="Idle until the next Strong tick"))
+                self.assertEqual(env.now, "2025-06-02T20:40:00+00:00")
+                self.assertEqual(env.observation()["suggested_role"], "strong")
+                self.assertNotIn("rejection", env.step(tool("read", source_id="earnings"))[4])
+
+    def test_explicit_strong_wait_acknowledges_the_cycle_and_preserves_idle_skip(self):
+        env = ResearchPortfolioEnv(fixture(), strict_replay=True, scheduled=True)
+        fixtures.ResearchPortfolioTests().prepare_question(env)
+        self.assertNotIn("rejection", env.step(action("wait", reason="Defer this open question until new evidence"))[4])
+        self.assertEqual(env.now, "2025-06-02T20:30:00+00:00")
+        env.step(action("wait", reason="Idle until the next Strong tick"))
+        self.assertEqual(env.now, "2025-06-02T20:40:00+00:00")
+        self.assertIsNone(env.observation()["suggested_role"])
+        self.assertIn("capacity", env.questions)
+        self.assertFalse(env.theses)
+
     def test_independent_reconciliation_detects_tampered_result(self):
         path = Path(__file__).parents[1] / "fixtures" / "demo.json"
         manifest = json.loads(path.read_text())

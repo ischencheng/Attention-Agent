@@ -86,6 +86,11 @@ Hash validation establishes artifact consistency. It does not certify the
 publisher's claims, prove that all relevant sources were captured, or provide
 independent attestation of the collector.
 
+Report arrival versions separately from source-native event IDs and publishers.
+Repeated delivery or an updated body does not become independent news, and
+distinct native IDs alone do not establish causal independence. The first
+archive's duplicate-heavy coverage is quantified in [EXPERIMENTS.md](EXPERIMENTS.md).
+
 The current market importer declares **historical reconstruction**: prices are
 downloaded after the interval and may include provider revisions. Such an archive
 can support a disclosed retrospective replay; it does not certify the original

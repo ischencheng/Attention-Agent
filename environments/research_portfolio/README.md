@@ -280,7 +280,10 @@ bridge's model identity against the archive, and each GPU response carries the
 pinned manifest digest. This is a trusted adapter contract, not independent
 remote attestation. The bridge records raw responses and generated token IDs;
 it supplies no log probabilities or trainer. The remote backend uses structured
-JSON-schema decoding and returns failures without repairing model outputs.
+JSON-schema decoding for the response envelope. The caller still decodes the
+action array inside `actions_json`, and the environment validates each action's
+arguments, role and prerequisites. Failures are returned without repairing
+model outputs.
 
 The app is ephemeral and permits one worker and one concurrent request. The
 worker enforces request and token budgets plus a 45-minute deadline. Stop the
