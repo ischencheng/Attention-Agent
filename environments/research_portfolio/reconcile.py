@@ -10,13 +10,17 @@ import math
 from .scenario import timestamp
 
 
-QUANTITY_TOLERANCE = Decimal("1e-12")
+def _quantity_roundoff(value):
+    # Market records Decimal quantities as JSON floats. One float ULP bounds
+    # both Decimal-to-float rounding and the shortest-decimal JSON round trip.
+    return Decimal.from_float(math.ulp(float(value)))
 
 
 def reconcile(manifest, summary):
     number = lambda value: Decimal(str(value))
     initial = number(manifest["portfolio"]["initial_cash"])
     cash, positions, receivables = initial, {}, {}
+    quantity_errors = {}
     terminal = timestamp(manifest["timeline"][-1])
     events, errors = [], []
     fills = [item for item in summary["account"]["ledger"] if item["type"] == "fill"]
@@ -36,6 +40,10 @@ def reconcile(manifest, summary):
         if not math.isclose(float(actual), float(expected), rel_tol=1e-9, abs_tol=1e-7):
             errors.append(f"{label}: recorded {actual}, recomputed {expected}")
 
+    def check_quantity(label, actual, expected, error_bound):
+        if abs(number(actual) - expected) > error_bound + _quantity_roundoff(actual):
+            errors.append(f"{label}: recorded {actual}, recomputed {expected}")
+
     for at, _, index, kind, item in sorted(events):
         if at > terminal:
             errors.append("fill after terminal horizon") if kind == "fill" else None
@@ -43,7 +51,9 @@ def reconcile(manifest, summary):
         asset = item["asset_id"]
         quantity = positions.get(asset, Decimal(0))
         if kind == "split":
-            positions[asset] = quantity * number(item["ratio"])
+            ratio = number(item["ratio"])
+            positions[asset] = quantity * ratio
+            quantity_errors[asset] = quantity_errors.get(asset, Decimal(0)) * ratio
         elif kind == "dividend_ex":
             receivables[index] = quantity * number(item["amount_per_share"])
         elif kind == "dividend_pay":
@@ -62,23 +72,29 @@ def reconcile(manifest, summary):
             fee = abs(signed) * price * number(manifest["portfolio"]["fee_bps"]) / 10000
             cash += -signed * price - fee
             positions[asset] = quantity + signed
+            quantity_errors[asset] = quantity_errors.get(asset, Decimal(0)) + _quantity_roundoff(item["quantity"])
             check("execution price", item["execution_price"], price)
             check("fee", item["fee"], fee)
             check("cash after fill", item["cash_after"], cash)
-            check("quantity after fill", item["quantity_after"], positions[asset])
-            if cash < Decimal("-0.0000001") or positions[asset] < Decimal("-0.0000001"):
+            check_quantity("quantity after fill", item["quantity_after"], positions[asset], quantity_errors[asset])
+            if cash < Decimal("-0.0000001") or positions[asset] < -quantity_errors[asset]:
                 errors.append("negative cash or shares")
+            if number(item["quantity_after"]) == 0 and abs(positions[asset]) <= quantity_errors[asset]:
+                # A verified full exit is a fresh zero checkpoint. Prior large
+                # fills must not erase a later, independently recorded tiny buy.
+                positions[asset] = Decimal(0)
+                quantity_errors[asset] = Decimal(0)
     values = {}
     for asset, quantity in positions.items():
-        # Serialized fractional fills can leave Decimal residue after a full
-        # exit. Apply the same share tolerance to valuation and membership.
-        if abs(quantity) <= QUANTITY_TOLERANCE:
+        # Accumulate the serialization uncertainty at each fill's own scale;
+        # a small newly opened holding must not disappear under an absolute floor.
+        if abs(quantity) <= quantity_errors.get(asset, Decimal(0)):
             continue
         mark = next(bar["close"] for bar in manifest["bars"]
                     if bar["asset_id"] == asset and timestamp(bar["close_at"]) == terminal)
         values[asset] = quantity * number(mark)
         actual = summary["account"]["positions"].get(asset, {})
-        check("final quantity " + asset, actual.get("quantity", 0), quantity)
+        check_quantity("final quantity " + asset, actual.get("quantity", 0), quantity, quantity_errors[asset])
         check("final mark " + asset, actual.get("mark_price", 0), mark)
     expected_assets = set(values)
     if set(summary["account"]["positions"]) != expected_assets:
