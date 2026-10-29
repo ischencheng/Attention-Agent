@@ -6,12 +6,14 @@ live pipeline, reinterpret decision packets as orders, or execute real trades.
 from __future__ import annotations
 
 import copy
+from datetime import timedelta
 import json
 from pathlib import Path
 import re
 from typing import Any
 
 from .market import Market
+from .clock import event_timeline, is_tick, next_tick, PERIODS
 from .scenario import json_copy, load_manifest, string_list, text, timestamp
 
 
@@ -24,22 +26,22 @@ ACTION_CONTRACT = {
               "mid": "Read originals; accumulate factual themes and unresolved questions.",
               "strong": "Research themes, obtain evidence, optionally discover assets, revise theses and paper allocations."},
     "actions": {
-        "triage": {"role": "fast", "source_id": "visible source ID", "disposition": "advance|ignore", "reason": "text"},
-        "tool": {"role": "fast|mid|strong", "tool": "read|search|discover|price_history|framework", "args": "see tools", "question_id": "required for Strong"},
-        "accumulate": {"role": "mid", "theme_id": "stable ID", "ticket_ids": ["ticket ID"], "summary": "factual summary", "facts": [{"source_id": "original ID", "claim": "attributed fact"}], "open_questions": ["text"], "authoritative_exception": False, "exception_reason": "required if exception is true"},
-        "open_research": {"role": "strong", "question_id": "stable ID", "theme_id": "eligible theme ID", "question": "research question"},
-        "judge": {"role": "strong", "thesis_id": "stable ID", "question_id": "opened question ID", "claim": "text", "evidence_ids": ["Strong-read original ID"], "counterevidence_ids": [], "uncertainty": "text", "invalidation_conditions": ["falsifiable condition"], "status": "research|investable|invalidated", "asset_ids": [], "what_changed": "required nonempty explanation when revising an existing thesis", "framework_analysis": {key: "analysis" for key in FRAMEWORK_FIELDS}, "risk_checks": {key: {"status": "PASS|FAIL|UNKNOWN", "evidence_ids": [], "reason": "text"} for key in RISK_FIELDS}},
-        "allocate": {"role": "strong", "target_weights": {"discovered asset ID": 0.25}, "thesis_ids": ["latest supporting thesis ID"], "reason": "text", "replace": False},
-        "wait": {"role": "strong", "reason": "continue research at next cutoff"},
-        "stop": {"role": "strong", "reason": "end actions; existing holdings still settle at original horizon"},
-        "cancel": {"role": "strong", "reason": "cancel pending paper order"},
+        "triage": {"type": "triage", "role": "fast", "source_id": "visible source ID", "disposition": "advance|ignore", "reason": "text"},
+        "tool": {"type": "tool", "role": "fast|mid|strong", "tool": "read|search|discover|price_history|framework", "args": "see tools", "question_id": "required for Strong"},
+        "accumulate": {"type": "accumulate", "role": "mid", "theme_id": "stable ID", "ticket_ids": ["ticket ID"], "summary": "factual summary", "facts": [{"source_id": "original ID", "claim": "attributed fact"}], "open_questions": ["text"], "authoritative_exception": False, "exception_reason": "required if exception is true"},
+        "open_research": {"type": "open_research", "role": "strong", "question_id": "stable ID", "theme_id": "eligible theme ID", "question": "research question"},
+        "judge": {"type": "judge", "role": "strong", "thesis_id": "stable ID", "question_id": "opened question ID", "claim": "text", "evidence_ids": ["Strong-read original ID"], "counterevidence_ids": [], "uncertainty": "text", "invalidation_conditions": ["falsifiable condition"], "status": "research|investable|invalidated", "asset_ids": [], "what_changed": "required nonempty explanation when revising an existing thesis", "framework_analysis": {key: "analysis" for key in FRAMEWORK_FIELDS}, "risk_checks": {key: {"status": "PASS|FAIL|UNKNOWN", "evidence_ids": [], "reason": "text"} for key in RISK_FIELDS}},
+        "allocate": {"type": "allocate", "role": "strong", "target_weights": {"discovered asset ID": 0.25}, "thesis_ids": ["latest supporting thesis ID"], "reason": "text", "replace": False},
+        "wait": {"type": "wait", "role": "strong", "reason": "continue research at next cutoff"},
+        "stop": {"type": "stop", "role": "strong", "reason": "end actions; existing holdings still settle at original horizon"},
+        "cancel": {"type": "cancel", "role": "strong", "reason": "cancel pending paper order"},
     },
     "tools": {"read": {"source_id": "visible source ID"},
               "search": {"query": "specific words", "intent": "support|contradiction"},
               "discover": {"query": "research-led asset search"},
               "price_history": {"asset_id": "discovered asset ID"},
               "framework": {"asset_id": "optional discovered asset ID"}},
-    "rules": ["All actions have a type and role. Optional as_of rejects stale actions; invocation records model provenance.",
+    "rules": ["Each action is a flat object with literal type and role fields, followed by its arguments at the same level: {\"type\":\"triage\",\"role\":\"fast\",\"source_id\":\"source-id\",\"disposition\":\"advance\",\"reason\":\"text\"}. Do not nest arguments under an action name. Optional as_of rejects stale actions; invocation records model provenance.",
               "Fast can read; Mid can read/search; Strong can use every tool after opening a question.",
               "Mid reads originals in its role before factual accumulation. Strong reads originals in its role before citing them.",
               "Themes become eligible with 3 independent events and 2 source providers, or an explicit authoritative hard-data exception.",
@@ -54,8 +56,24 @@ ACTION_CONTRACT = {
 
 class ResearchPortfolioEnv:
     def __init__(self, manifest: dict | str | Path, *, actions_per_cutoff: int = 64,
-                 max_steps: int = 512):
+                 max_steps: int = 512, strict_replay: bool = False,
+                 scheduled: bool = False, framework_snapshot: dict | None = None):
         self.manifest = load_manifest(manifest)
+        # The reference is an episode input. A deployment or local file update
+        # must not change research guidance halfway through a recorded rollout.
+        if framework_snapshot is None:
+            framework_snapshot = json.loads((Path(__file__).parent / "fixtures" / "mrbrain_framework.json").read_text())
+        self._framework_snapshot = json_copy(framework_snapshot)
+        if (not isinstance(self._framework_snapshot, dict)
+                or not isinstance(self._framework_snapshot.get("framework"), dict)
+                or not self._framework_snapshot["framework"]):
+            raise ValueError("framework snapshot must contain a nonempty framework object")
+        if type(strict_replay) is not bool or type(scheduled) is not bool:
+            raise ValueError("strict_replay and scheduled must be boolean")
+        self.strict_replay, self.scheduled = strict_replay, scheduled
+        if scheduled:
+            self.manifest["timeline"] = event_timeline(self.manifest)
+        self._initial_timeline = tuple(self.manifest["timeline"])
         for name, value in (("actions_per_cutoff", actions_per_cutoff), ("max_steps", max_steps)):
             if type(value) is not int or value < 1:
                 raise ValueError(f"{name} must be a positive integer")
@@ -66,6 +84,8 @@ class ResearchPortfolioEnv:
     def reset(self, *, seed: int | None = None, options: dict | None = None):
         if options:
             raise ValueError("reset options are not supported")
+        # Policy-selected deadlines belong to one rollout, not the frozen tape.
+        self.manifest["timeline"] = list(self._initial_timeline)
         self.market = Market(copy.deepcopy(self.manifest))
         self.index = self.steps = self.cutoff_steps = 0
         self.terminated = self.truncated = False
@@ -82,6 +102,9 @@ class ResearchPortfolioEnv:
         self.discovered_assets: dict[str, dict] = {}
         self.tool_results: list[dict] = []
         self.trajectory: list[dict] = []
+        self._strong_active = False
+        self._strong_seen = None
+        self._last_strong_at = None
         return self.observation(), {"episode_id": self.manifest["episode_id"], "seed": seed,
                                     "reward_contract": "terminal_net_portfolio_return_v1"}
 
@@ -89,10 +112,58 @@ class ResearchPortfolioEnv:
     def now(self):
         return self.manifest["timeline"][self.index]
 
+    @property
+    def framework_snapshot(self):
+        return copy.deepcopy(self._framework_snapshot)
+
     def _visible_sources(self):
         now = timestamp(self.now)
-        return {item["id"]: item for item in self.manifest["sources"]
+        ordered = sorted(self.manifest["sources"], key=lambda item: (
+            max(timestamp(item["published_at"]), timestamp(item["available_at"])), item["id"]))
+        return {item["id"]: item for item in ordered
                 if timestamp(item["available_at"]) <= now and timestamp(item["published_at"]) <= now}
+
+    def _theme_version(self):
+        return tuple((key, value["trace_id"]) for key, value in sorted(self.themes.items()) if value["eligible"])
+
+    def _due_reviews(self):
+        return [{"thesis_id": key, "due_at": value["revisions"][-1]["next_review_at"]}
+                for key, value in self.theses.items()
+                if value["revisions"][-1].get("next_review_at")
+                and timestamp(value["revisions"][-1]["next_review_at"]) <= timestamp(self.now)]
+
+    def _suggested_role(self):
+        visible = self._visible_sources()
+        handled = {ticket for theme in self.themes.values() for ticket in theme["ticket_ids"]}
+        if set(visible) - set(self.triage):
+            return "fast"
+        if set(self.tickets) - handled and (not self.scheduled or is_tick(self.now, self.manifest["timeline"][0], "mid")):
+            return "mid"
+        if not self.scheduled or self._strong_active:
+            return "strong"
+        reviews = self._due_reviews()
+        exact_review = any(timestamp(item["due_at"]) == timestamp(self.now) for item in reviews)
+        daily = (bool(self.theses) and self._last_strong_at is not None
+                 and timestamp(self.now) - timestamp(self._last_strong_at) >= timedelta(days=1))
+        new_evidence = bool(self._theme_version()) and self._theme_version() != self._strong_seen
+        if exact_review or (is_tick(self.now, self.manifest["timeline"][0], "strong")
+                            and (new_evidence or reviews or daily)):
+            return "strong"
+        return None
+
+    def _action_contract(self):
+        contract = copy.deepcopy(ACTION_CONTRACT)
+        contract["actions"]["judge"]["next_review_at"] = "optional future ISO timestamp for research review"
+        if self.strict_replay:
+            contract["actions"]["tool"]["tool"] = "read|catalog|counterevidence_review|discover|price_history|framework"
+            del contract["tools"]["search"]
+            contract["tools"]["catalog"] = {"offset": "nonnegative integer", "limit": "integer from 1 to 50"}
+            contract["tools"]["counterevidence_review"] = {"source_ids": ["previously read original ID"], "assessment": "what was checked and what remains unknown"}
+            contract["rules"][1] = "Fast reads originals; Mid reads or lists available originals; Strong uses the listed archive tools. No search or external tools."
+            contract["rules"][4] = "Increasing exposure requires an investable latest judgment, all risk checks PASS, framework guidance, an actual counterevidence_review of previously read originals, discovery, and nonempty price history before that judgment."
+        if self.scheduled:
+            contract["rules"].append("Act only as suggested_role. Mid wakes every 30 virtual minutes and Strong every 40, plus research deadlines. Idle intervals advance without model calls.")
+        return contract
 
     @staticmethod
     def _metadata(source):
@@ -124,9 +195,7 @@ class ResearchPortfolioEnv:
 
     def observation(self):
         visible = self._visible_sources()
-        handled = {ticket for theme in self.themes.values() for ticket in theme["ticket_ids"]}
-        suggested_role = ("fast" if set(visible) - set(self.triage) else
-                          "mid" if set(self.tickets) - handled else "strong")
+        suggested_role = self._suggested_role()
         return copy.deepcopy({"episode_id": self.manifest["episode_id"], "mode": self.manifest["mode"],
             "as_of": self.now, "horizon": self.manifest["timeline"][-1], "scope": self.manifest["scope"],
             "suggested_role": suggested_role,
@@ -138,7 +207,11 @@ class ResearchPortfolioEnv:
             "account": self._account(), "execution_contract": self._execution_contract(),
             "budget": {"steps_used": self.steps, "max_steps": self.max_steps,
                 "cutoff_actions_used": self.cutoff_steps, "actions_per_cutoff": self.actions_per_cutoff},
-            "action_contract": ACTION_CONTRACT})
+            "action_contract": self._action_contract(),
+            "clock": {"scheduled": self.scheduled, "period_minutes": PERIODS,
+                      "next_mid_at": next_tick(self.now, self.manifest["timeline"][0], "mid"),
+                      "next_strong_at": next_tick(self.now, self.manifest["timeline"][0], "strong"),
+                      "due_reviews": self._due_reviews()}})
 
     def step(self, action: dict):
         if self.terminated or self.truncated:
@@ -185,7 +258,22 @@ class ResearchPortfolioEnv:
         self.trajectory.append(copy.deepcopy(record))
         return observation, reward, self.terminated, self.truncated, copy.deepcopy(info)
 
-    def _advance(self):
+    def _advance(self, *, acknowledge_strong=False):
+        if self._strong_active:
+            # A cutoff budget can interrupt a successful read or open question.
+            # Only an explicit wait acknowledges this cycle; otherwise evidence
+            # remains pending for the next scheduled Strong tick.
+            if acknowledge_strong:
+                self._strong_seen = self._theme_version()
+                self._last_strong_at = self.now
+            self._strong_active = False
+        if self.scheduled and self.index + 1 < len(self.manifest["timeline"]):
+            following = timestamp(self.manifest["timeline"][self.index + 1])
+            deadlines = [timestamp(item["revisions"][-1]["next_review_at"])
+                         for item in self.theses.values() if item["revisions"][-1].get("next_review_at")]
+            between = [due for due in deadlines if timestamp(self.now) < due < following]
+            if between:
+                self.manifest["timeline"].insert(self.index + 1, min(between).isoformat())
         next_index = min(self.index + 1, len(self.manifest["timeline"]) - 1)
         self.market.advance(self.manifest["timeline"][next_index])
         self.index = next_index
@@ -215,7 +303,7 @@ class ResearchPortfolioEnv:
             "tool": {"tool", "args", "question_id"},
             "accumulate": {"theme_id", "ticket_ids", "summary", "facts", "open_questions", "authoritative_exception", "exception_reason"},
             "open_research": {"question_id", "theme_id", "question"},
-            "judge": {"thesis_id", "question_id", "claim", "evidence_ids", "counterevidence_ids", "uncertainty", "invalidation_conditions", "status", "asset_ids", "framework_analysis", "risk_checks", "confidence", "what_changed"},
+            "judge": {"thesis_id", "question_id", "claim", "evidence_ids", "counterevidence_ids", "uncertainty", "invalidation_conditions", "status", "asset_ids", "framework_analysis", "risk_checks", "confidence", "what_changed", "next_review_at"},
             "allocate": {"target_weights", "thesis_ids", "reason", "replace"},
             "wait": {"reason"}, "stop": {"reason"}, "cancel": {"reason"},
         }
@@ -228,21 +316,34 @@ class ResearchPortfolioEnv:
         role = action.get("role")
         if not isinstance(role, str) or role not in {"fast", "mid", "strong"}:
             raise ValueError("role must be fast, mid or strong")
+        if self.scheduled and kind != "stop":
+            ready = self._suggested_role()
+            if role != ready and not (ready is None and kind == "wait" and role == "strong"):
+                raise ValueError("role is not scheduled at this cutoff")
         if "invocation" in action:
             self._invocation(action)
         expected = {"triage": "fast", "accumulate": "mid"}.get(kind, "strong")
         if kind != "tool" and role != expected:
             raise ValueError(f"{kind} belongs to the {expected} role")
+        activate_strong = (self.scheduled and role == "strong"
+                           and self._suggested_role() == "strong" and kind != "stop")
         if kind in {"wait", "stop", "cancel"}:
             reason = text(action.get("reason"), "reason")
             if kind == "wait":
-                self._advance()
+                if activate_strong:
+                    self._strong_active = True
+                self._advance(acknowledge_strong=True)
                 return {"status": "waited", "reason": reason}
             if kind == "stop":
                 self._finish("stop", truncated=False)
                 return {"status": "stopped", "reason": reason}
-            return {"status": "cancelled", "order": self.market.cancel(self.now, reason)}
-        return getattr(self, f"_{kind}")(action)
+            result = {"status": "cancelled", "order": self.market.cancel(self.now, reason)}
+        else:
+            result = getattr(self, f"_{kind}")(action)
+        # A rejected action consumes budget but does not acknowledge evidence.
+        if activate_strong:
+            self._strong_active = True
+        return result
 
     @staticmethod
     def _invocation(action):
@@ -297,6 +398,9 @@ class ResearchPortfolioEnv:
         role, tool = action["role"], action.get("tool")
         allowed = {"fast": {"read"}, "mid": {"read", "search"},
                    "strong": {"read", "search", "discover", "price_history", "framework"}}
+        if self.strict_replay:
+            allowed = {"fast": {"read"}, "mid": {"read", "catalog"},
+                       "strong": {"read", "catalog", "counterevidence_review", "discover", "price_history", "framework"}}
         if not isinstance(tool, str) or tool not in allowed[role]:
             raise ValueError(f"tool is unavailable to {role}")
         question_id = self._question(action) if role == "strong" else None
@@ -306,7 +410,9 @@ class ResearchPortfolioEnv:
         if not isinstance(args, dict):
             raise ValueError("tool args must be an object")
         keys = {"read": {"source_id"}, "search": {"query", "intent"}, "discover": {"query"},
-                "price_history": {"asset_id"}, "framework": {"asset_id"}}[tool]
+                "price_history": {"asset_id"}, "framework": {"asset_id"},
+                "catalog": {"offset", "limit"},
+                "counterevidence_review": {"source_ids", "assessment"}}[tool]
         if set(args) - keys or (tool != "framework" and set(args) != keys):
             raise ValueError("incorrect tool argument fields")
         sources = self._visible_sources()
@@ -317,6 +423,25 @@ class ResearchPortfolioEnv:
             result = copy.deepcopy(sources[source_id])
             self.read_sources[source_id] = result
             self.role_reads[role].add(source_id)
+        elif tool == "catalog":
+            offset, limit = args["offset"], args["limit"]
+            if type(offset) is not int or offset < 0 or type(limit) is not int or not 1 <= limit <= 50:
+                raise ValueError("catalog requires nonnegative offset and limit from 1 to 50")
+            items = list(sources.values())
+            result = {"originals": [self._metadata(item) for item in items[offset:offset + limit]],
+                      "total_available": len(items), "next_offset": offset + limit if offset + limit < len(items) else None,
+                      "coverage": "Only originals available at this cutoff, ordered by arrival and stable ID."}
+        elif tool == "counterevidence_review":
+            refs = string_list(args["source_ids"], "source_ids", nonempty=True)
+            assessment = text(args["assessment"], "assessment")
+            calls = [item for item in self.tool_results if item["role"] == "strong"
+                     and item["question_id"] == question_id and item["tool"] == "read"]
+            read_ids = {item["args"]["source_id"] for item in calls}
+            if not set(refs) <= read_ids or not set(refs) <= set(sources):
+                raise ValueError("counterevidence review requires prior original reads under this question")
+            result = {"source_ids": refs, "assessment": assessment,
+                      "assessment_origin": "policy", "read_receipts_verified": True,
+                      "coverage": "Cited archived reads only. This receipt does not certify the analysis or absence of contrary evidence."}
         elif tool == "search":
             query = text(args.get("query"), "query")
             if not isinstance(args.get("intent"), str) or args["intent"] not in {"support", "contradiction"}:
@@ -341,9 +466,8 @@ class ResearchPortfolioEnv:
                 asset_id = text(args["asset_id"], "framework asset_id")
                 if asset_id not in self.discovered_assets:
                     raise ValueError("framework asset must have been discovered")
-            frozen = json.loads((Path(__file__).parent / "fixtures" / "mrbrain_framework.json").read_text())
             result = {"kind": "frozen_original_framework", "source": "skills/mrbrain_invest.py FRAMEWORK",
-                      "original_framework": frozen,
+                      "original_framework": self.framework_snapshot,
                       "dimensions": list(FRAMEWORK_FIELDS), "checklist": list(RISK_FIELDS),
                       "instructions": "Assess each dimension against read evidence. Record PASS, FAIL or UNKNOWN and a reason for every prohibition. NO PRICE DATA blocks increases. Failed gates never block corrections, invalidation or reducing risk.",
                       "limitation": "Bundled original framework snapshot, not a live MrBrain CLI call or generated investment analysis."}
@@ -463,6 +587,8 @@ class ResearchPortfolioEnv:
             raise ValueError("confidence must be a finite number in [0, 1]")
         if previous or "what_changed" in action:
             text(action.get("what_changed"), "what_changed for revision")
+        if "next_review_at" in action and timestamp(action["next_review_at"]) <= timestamp(self.now):
+            raise ValueError("next_review_at must be strictly after the current cutoff")
         revision = {key: copy.deepcopy(value) for key, value in action.items()
                     if key not in {"type", "role", "as_of", "invocation"}}
         revision.update({"asset_ids": assets, "framework_analysis": framework, "risk_checks": risks,
@@ -487,7 +613,8 @@ class ResearchPortfolioEnv:
                  and item["question_id"] == revision["question_id"]
                  and item["step"] < revision["step"]]
         return (any(item["tool"] == "framework" and item["args"].get("asset_id", asset_id) == asset_id for item in calls)
-                and any(item["tool"] == "search" and item["args"]["intent"] == "contradiction" for item in calls)
+                and any((item["tool"] == "counterevidence_review" if self.strict_replay else
+                         item["tool"] == "search" and item["args"]["intent"] == "contradiction") for item in calls)
                 and any(item["tool"] == "discover" and any(asset["asset_id"] == asset_id for asset in item["result"]["assets"]) for item in calls)
                 and any(item["tool"] == "price_history" and item["args"]["asset_id"] == asset_id and item["result"]["bars"] for item in calls))
 

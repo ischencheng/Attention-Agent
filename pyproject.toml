@@ -12,6 +12,7 @@ dependencies = ["jsonschema>=4.26,<5"]
 
 [project.optional-dependencies]
 gym = ["gymnasium==1.4.0"]
+archive = ["exchange-calendars==4.13.2"]
 
 [project.scripts]
 attention-financial-env = "environments.financial_decision.cli:main"

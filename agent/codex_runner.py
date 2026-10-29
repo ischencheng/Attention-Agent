@@ -23,6 +23,12 @@ import uuid
 from jsonschema.validators import validator_for
 from jsonschema.exceptions import ValidationError
 
+try:
+    from .role_policy import MID_RULES, STRONG_RULES
+except ImportError:  # Direct execution from the mounted agent workspace.
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from role_policy import MID_RULES, STRONG_RULES
+
 
 _ACTIVE_PROCESSES = set()
 _ACTIVE_LOCK = threading.Lock()
@@ -109,7 +115,8 @@ def _stop_process(process):
 
 def run(prompt, schema, cwd, output_dir, timeout, model=None, *,
         codex_bin="codex", sandbox="workspace-write", network_access=False, disable_tools=False,
-        model_instructions=None, environment_profile="model", additional_writable_dirs=()):
+        model_instructions=None, environment_profile="model", additional_writable_dirs=(),
+        model_endpoint=None):
     """Return final JSON, JSONL events, and reported usage, or raise CodexRunError.
 
     ``schema`` is a JSON Schema object, not a file path. ``output_dir`` must be
@@ -180,6 +187,20 @@ def run(prompt, schema, cwd, output_dir, timeout, model=None, *,
     ]
     if model:
         command += ["--model", str(model)]
+    if model_endpoint is not None:
+        if not disable_tools or environment_profile != "model":
+            raise ValueError("local model endpoints require the tool-disabled model profile")
+        from environments.research_portfolio.local_model import codex_provider_config
+        config = codex_provider_config(model_endpoint)
+        # Flatten nested provider fields into individual TOML config overrides.
+        # Only the validated loopback helper supplies these keys and values.
+        def append_config(prefix, value):
+            if isinstance(value, dict):
+                for key, item in value.items():
+                    append_config(prefix + "." + key if prefix else key, item)
+            else:
+                command.extend(["-c", prefix + "=" + json.dumps(value)])
+        append_config("", config)
     if network_access:
         command += ["-c", "sandbox_workspace_write.network_access=true"]
     for directory in writable_dirs:
@@ -212,6 +233,7 @@ def run(prompt, schema, cwd, output_dir, timeout, model=None, *,
         "environment_profile": environment_profile, "environment_names": sorted(env),
         "additional_writable_dirs": writable_dirs,
         "custom_model_instructions": model_instructions is not None, "success": False,
+        "model_endpoint": model_endpoint,
         "returncode": None, "usage": None, "cli_version": None,
     }
     events = []
@@ -337,22 +359,12 @@ def cycle_prompt(role, state_id, research_context=DEFAULT_RESEARCH_CONTEXT):
         "Return the required final JSON using observed results; use blocked only for unresolved failures that prevent completing the cycle. "
     )
     if role == "mid":
-        return common + (
-            "Organize unannotated attention tickets into pending themes. Deduplicate by independent causal event. "
-            "Publish fact-only annotations only for 3+ independent signals from 2+ sources, or an explicit "
-            "authoritative-hard-data exception. Keep unresolved themes in state. Do not perform investment analysis."
-        )
+        return common + MID_RULES
     return common + (
         "Discover research topics from the incoming evidence; there is no fixed portfolio or ticker filter. "
         f"Research topics: {research_context or DEFAULT_RESEARCH_CONTEXT}. Assets may emerge from a supported thesis. "
         "The separately configured Twitter follow list remains a source, not an asset whitelist. "
-        "Review both qualifying multi-signal annotations and authoritative-hard-data exceptions. "
-        "Continue existing theses across cycles, record supporting and contradicting evidence, state invalidation "
-        "conditions and what changed. Carry out the mandatory MrBrain framework/checklist, price-history and "
-        "semantic contradiction checks when assessing an investment action. Risk gates may block new exposure, "
-        "but must never block recording a thesis invalidation, correction or risk reduction. "
-        "If no new supported decision is warranted, preserve state without duplicate publication."
-    )
+    ) + STRONG_RULES
 
 
 def main():

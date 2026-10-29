@@ -21,6 +21,7 @@ RUN useradd -m -s /bin/bash agent \
     && chown -R agent:agent /app /home/agent/.codex
 COPY AGENTS.md /app/AGENTS.md
 COPY codex_runner.py /app/codex_runner.py
+COPY role_policy.py /app/role_policy.py
 ENV CODEX_HOME=/home/agent/.codex
 USER agent
 WORKDIR /app

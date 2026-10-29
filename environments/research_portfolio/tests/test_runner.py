@@ -4,7 +4,7 @@ import tempfile
 import unittest
 
 from environments.research_portfolio.demo import demo_actions
-from environments.research_portfolio.runner import CodexPolicy, run_episode
+from environments.research_portfolio.runner import CodexPolicy, run_episode, policy_observation
 
 
 FIXTURE = Path(__file__).parents[1] / "fixtures" / "demo.json"
@@ -15,6 +15,19 @@ class RunnerTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
         self.addCleanup(self.temp.cleanup)
+
+    def test_policy_memory_delivers_new_original_once_and_preserves_read_receipts(self):
+        old = {"tool_call_id": "tool-1", "tool": "read", "result": {"id": "one", "body": "old original"}}
+        new = {"tool_call_id": "tool-2", "tool": "read", "result": {"id": "two", "body": "new original"}}
+        observation = {"read_sources": [old["result"], new["result"]], "tool_results": [old, new],
+                       "execution_feedback": [{"result": {"result": new}}],
+                       "themes": [{"facts": [{"source_id": "one", "claim": "attributed fact"}]}]}
+        projected = policy_observation(observation)
+        self.assertEqual(json.dumps(projected).count("new original"), 1)
+        self.assertNotIn("old original", json.dumps(projected))
+        self.assertEqual(projected["tool_results"][0]["result"]["id"], "one")
+        self.assertEqual(projected["themes"], observation["themes"])
+        self.assertEqual(observation["tool_results"][0]["result"]["body"], "old original")
 
     def test_complete_workflow_replays_with_the_same_loss_and_provenance(self):
         first = run_episode(FIXTURE, self.root / "first", actions=demo_actions())
@@ -82,6 +95,25 @@ class RunnerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "new or empty"):
             run_episode(FIXTURE, out, actions=demo_actions())
         self.assertEqual((out / "keep").read_text(), "prior run")
+
+    def test_explicit_relative_codex_path_survives_isolated_working_directory(self):
+        observed = {}
+        def fake(*args, **kwargs):
+            observed.update(kwargs)
+            return {"events": [], "final": {"actions_json": '[{"type":"stop","role":"strong","reason":"done"}]'}}
+        policy = CodexPolicy(self.root, runner=fake, codex_bin="runtime/bin/codex")
+        policy.choose({"suggested_role": "strong", "as_of": "2026-06-01T20:00:00Z"})
+        self.assertEqual(observed["codex_bin"], str(Path("runtime/bin/codex").resolve()))
+
+    def test_rejection_only_rollout_is_distinct_from_a_cash_decision(self):
+        def fake(*args, **kwargs):
+            return {"events": [], "final": {"actions_json": '[{"role":"fast","triage":{"source_id":"capex"}}]'}}
+        summary = run_episode(FIXTURE, self.root / "rejections", codex=True,
+                              policy_runner=fake, max_calls=2)
+        self.assertEqual(summary["policy_outcome"], "rejected_actions_only")
+        self.assertEqual(summary["rejected_actions"], 2)
+        self.assertTrue(summary["policy_budget_exhausted"])
+        self.assertEqual(summary["reward"], 0)  # The frozen accounting reward is unchanged.
 
     def test_nonfinite_or_nonobject_transcripts_fail_before_execution(self):
         for actions in ([None], [{"role": "strong", "type": "stop", "reason": float("nan")}],

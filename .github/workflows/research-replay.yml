@@ -1,0 +1,28 @@
+name: Research replay
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e '.[archive]'
+      - run: python -m unittest discover -s environments/research_portfolio/tests -v
+      - name: Produce the synthetic workflow exhibit
+        run: python -m environments.research_portfolio demo --output /tmp/research-demo
+      - uses: actions/upload-artifact@v4
+        with:
+          name: synthetic-research-trace
+          path: /tmp/research-demo/
+          retention-days: 14

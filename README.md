@@ -1,101 +1,153 @@
-# AI Attention Proxy: Financial Decision RL Environment
+# Attention Proxy
 
-Train and evaluate the full process from incoming information to financial
-research, evidence gathering, judgment, paper position changes and later
-portfolio returns. The original Fast/Mid/Strong workflow continues while
-positions are held, with sources and decisions available for inspection.
+**An inspectable financial research environment for long-horizon language-model agents.**
 
-The [research-to-portfolio environment](environments/research_portfolio/README.md)
-provides an offline `reset`/`step` interface, active research tools, versioned
-judgments, next-open paper fills, a cash/position ledger and terminal net-return
-reward. Run the free synthetic example:
+Follow a decision from incoming information through source triage, active research,
+contradictory evidence, instrument discovery and paper position changes. Research
+continues while positions are held. The episode's reward is net portfolio return
+at a fixed horizon.
+
+[Run an episode](#run-an-episode) ·
+[Environment contract](environments/research_portfolio/README.md) ·
+[Evaluation method](environments/research_portfolio/EVALUATION.md) ·
+[Recorded experiments](environments/research_portfolio/EXPERIMENTS.md) ·
+[Production runtime](LOCAL_RUNTIME.md)
+
+The repository includes an offline `reset`/`step` environment, a bounded Codex
+inference adapter, an interactive trajectory viewer, and the production
+information pipeline that motivated its design. Model weight training and
+held-out investment performance are separate experiments.
+
+The first GPU attempt reached one theme, then failed after repeated reads and
+an output-token limit. It produced no judgment or position. The
+[experiment record](environments/research_portfolio/EXPERIMENTS.md) keeps these
+outcomes and the earlier local failures alongside the model, runtime and data
+limits, with a [machine-readable result](environments/research_portfolio/results/2026-10-29-qwen14b-l40s-v1.json).
+
+![Synthetic research replay with a time cutoff, evidence path and account ledger](docs/images/replay.png)
+
+*Synthetic demonstration: a fixed action transcript illustrates the viewer.
+The full-run accounting result stays separate from the selected replay cutoff.*
+
+## Run an episode
+
+Use Python 3.12 or later. The synthetic example needs no model service, API keys
+or production services:
 
 ```bash
 python -m pip install -e .
 python -m environments.research_portfolio demo --output /tmp/attention-rl-demo
 ```
 
-The demo uses fictional data and a hand-written policy. It demonstrates episode
-execution and traceability; model weight training and investment performance
-require separate experiments.
+Open `/tmp/attention-rl-demo/trace.html`. It shows a research question, an initial
+paper allocation, new evidence, a thesis revision and reduced exposure, followed
+by research into another topic. Move the replay position to inspect only the
+sources and account state visible at that transition. The full-run outcome is
+labelled separately.
 
-The environment builds on Attention Proxy's
-[delegated information consumption](PRODUCT.md) pipeline:
+This example uses fictional data and a fixed action transcript. Its return is
+an accounting fixture. For model-selected actions and archived-source replay,
+see the [environment guide](environments/research_portfolio/README.md).
 
-- **Fast:** allocate attention to potentially useful originals.
-- **Mid:** accumulate facts, source relationships and unresolved questions.
-- **Strong:** maintain a judgment, preserve counterevidence and decide whether a
-  researched judgment warrants a position change.
+## The decision process
 
-Entities emerge from the configured topics. Research, abstention and waiting are
-valid actions; there is no required portfolio or trade.
+```mermaid
+flowchart LR
+    Sources[Source arrivals] --> Obs[Time-gated observation]
+    Obs --> Fast[Fast: route attention]
+    Fast --> Mid[Mid: connect facts and questions]
+    Mid --> Strong[Strong: investigate and revisit]
+    Strong --> Evidence[Read originals and counterevidence]
+    Evidence --> Strong
+    Strong --> Discovery[Optional instrument discovery]
+    Discovery --> Judgment[Versioned judgment]
+    Strong --> Judgment
+    Judgment --> Allocation[Paper target allocation]
+    Allocation --> Fills[Next-open fills]
+    Fills --> Account[Cash, positions and ledger]
+    Account --> Obs
+    Account --> Reward[Fixed-horizon net return]
+```
 
-The earlier [forecast environment](environments/financial_decision/README.md)
-retains its time-gated forecasts, frozen scoring contract and optional Gymnasium
-adapter. Its prediction scores and the portfolio environment's returns are
-separate evaluation contracts.
+The starting point is a topic scope. Instruments emerge during research; there
+is no required holding or trade. A judgment can remain research-only. Waiting,
+revising a thesis and reducing exposure are part of the same episode.
 
-## Production pipeline
+The environment exposes the cost, concentration and execution rules before the
+policy acts. Increasing exposure requires a linked judgment and the recorded
+research prerequisites. These checks establish the decision's evidence path;
+the financial outcome still comes from the account ledger.
 
-The existing stack connects multi-source ingestion, Kafka/Flink, LLM workers,
-PostgreSQL, FastAPI and a React dashboard. See [CLAUDE.md](CLAUDE.md) for the
-architecture and development commands.
+## What a run leaves behind
 
-For the complete local deployment, use [the runtime guide](LOCAL_RUNTIME.md).
-`scripts/local_pipeline.py start` starts the actual streaming services and a
-persistent host supervisor for the Fast classifier, semantic embeddings,
-Mid/Strong and production-result evaluation. The dashboard exposes each stage
-and the agents' last saved state. Merely starting idle agent containers is not
-an agent schedule.
+| Evidence | What to inspect |
+| --- | --- |
+| `episode.json`, `contract.json` | Frozen scenario, horizon, costs, action budgets and implementation hashes. |
+| `framework.json` | Framework tool snapshot retained and hashed for new runs. |
+| `trajectory.jsonl`, `actions.json` | Executed role actions, returned tool results, rejections and public observations. |
+| `model-calls/`, `model-calls.json` | Actual invocation identity, execution status and usage when available. |
+| `reconciliation.json` | Account arithmetic recomputed from recorded fills and the market tape. |
+| `summary.json`, `trace.html` | Run eligibility, research path, positions, NAV and terminal reward. |
 
-The dashboard's **Decision trace** connects original sources, recorded routing
-reasons, Mid annotations and Strong research. Inspect current judgments, revision
-history, independently frozen versions and recorded agent cycles separately.
-[Trace design and book references](TRACE_DESIGN.md) explain the evidence contract,
-deployment and the specific ideas adopted from AI Agent Book.
+Archive admission additionally records source receipts, market-data vintage and
+pinned policy identities. The viewer distinguishes verified fields, unknown
+model knowledge cutoffs, historical price reconstruction and ineligible runs.
+See the [evaluation card](environments/research_portfolio/EVALUATION.md) for the
+complete evidence matrix and the boundaries of each check.
 
-## Continuing judgment and delayed evaluation
+## Production and replay
 
-The [Attention Judgment environment](environments/attention_judgment/README.md)
-uses the original topic scope to discover research questions, retain/revise
-MrBrain-informed theses, and freeze predictions before daily, weekly and monthly
-market observations. It includes a Codex runner, durable audit ledger, real market
-calendar, price/benchmark evaluator, source coverage and a bounded daily loop.
-It does not require a fixed portfolio, and no real orders are placed.
+The production application receives multiple information sources through
+Kafka/Flink, runs Fast/Mid/Strong workers, persists state in PostgreSQL, and
+exposes it through FastAPI and a React dashboard. The
+[local runtime guide](LOCAL_RUNTIME.md) describes the actual services and
+supervisor. The [trace design](TRACE_DESIGN.md) connects source records,
+annotations, judgments and independently frozen versions.
 
-Mid and Strong now run through the open-source Codex CLI 0.163.0. Their existing
-state IDs remain compatible. The local deployment uses one Codex Fast filter,
-with a zero-model delivery relay and a real local embedding model. Fast and Mid
-default to `gpt-6-luna`; Strong defaults to `gpt-6.1-sol`. Role-specific model
-settings override the shared fallback. Gemini remains an optional Fast provider.
-See [agent/AGENTS.md](agent/AGENTS.md), `.env.example`, and the environment README
-for authentication, operation and measured limitations. The hosted model itself
-is not claimed to be open source.
+The portfolio environment is an isolated implementation of the same research
+process and role rules. It uses archived inputs, a deterministic event clock and
+a simulated account. It does not run Kafka/Flink inside each episode or send
+orders to a broker. Production operation, replay correctness and model quality
+have separate evidence.
 
-`pipeline.py` observes real `decision_packets`, independently verifies provenance,
-and freezes them in `runs/production/`. It also versions Strong's saved research
-state independently, including cycles that produce no decision. Research snapshots
-preserve the original reasoning and update/freeze times; they remain unscored and
-do not create market predictions. Reports expose counts and lineage, while the
-complete state stays in the local ledger. Observer polling cannot recover changes
-that were overwritten between polls.
+Two complementary environments retain their own contracts:
 
-The earlier `run.py`/`daily.py` RSS pilot
-is a separate experiment and is not evidence that the production pipeline ran.
+| Environment | Evaluation target |
+| --- | --- |
+| [Attention Judgment](environments/attention_judgment/README.md) | Continuing topic-led research and independently frozen production decision packets, with daily, weekly and monthly market observations. |
+| [Financial Decision](environments/financial_decision/README.md) | Time-gated forecasts under a frozen prediction-scoring contract. |
 
-## Evidence provenance and software engineering evaluation
+Research-only state remains distinct from a formal prediction or an explicit
+hold decision. The original product rationale is in [PRODUCT.md](PRODUCT.md).
+
+## A reproducible software engineering task
 
 The [Attention Provenance environment](environments/attention_provenance/README.md)
-turns a real gap in this pipeline into a reproducible coding task: preserve a
-decision's historical evidence through corrections, replay, and source-ID
-collisions. It includes a frozen unsolved checkout, explicit task contract,
-reference repair, real-PostgreSQL grader, failure traces, and grader self-checks.
+turns a concrete pipeline defect into a coding-agent task: preserve the evidence
+behind an old decision after source corrections, duplicate deliveries and
+annotation updates.
 
-The repair adds immutable original records, decision evidence snapshots, and
-`GET /api/decisions/{id}/evidence`. It reports legacy or broken provenance
-explicitly rather than reconstructing an unsupported history.
+It provides a frozen unsolved checkout, an explicit task contract, an external
+real-PostgreSQL grader, a reference repair and deliberately broken solutions.
+The [verification record](environments/attention_provenance/VERIFICATION.md)
+separates reference and mutation checks from model attempts. The current
+checkout contains the repair; blind attempts start from the exported baseline.
 
-Read the [Chinese design explanation](environments/attention_provenance/DESIGN.zh-CN.md)
-for the connection to the original project and Mechanize's task-design essays.
-This is an engineering evaluation prototype; model difficulty and RL training
-benefits have not been measured.
+## Validate the environment
+
+Install the archive extra for calendar-bound admission checks and the full test
+suite. The synthetic demo above only requires the base package.
+
+```bash
+python -m pip install -e '.[archive]'
+python -m unittest discover -s environments/research_portfolio/tests -v
+```
+
+Tests cover temporal information boundaries, research gates, role scheduling,
+order execution, costs, corporate actions, failure handling and trace rendering.
+Adversarial cases change hidden future evidence and prices, attempt premature
+reads, shift market-session timestamps, and corrupt recorded account results.
+Archive admission binds opens and closes to the pinned XNYS calendar; historical
+price revisions remain a separate data limitation. The independent reconciler checks
+account arithmetic; task difficulty, learned policy improvement and investment
+skill require their own evaluation runs.
