@@ -318,7 +318,7 @@ def _current_max_id(table: str) -> int:
             with conn.cursor() as cur:
                 cur.execute(f"SELECT COALESCE(MAX(id), 0) FROM {table}")  # noqa: S608 – table name is hardcoded by callers
                 return int(cur.fetchone()[0])
-    except Exception:
+    except psycopg2.Error:
         return 0
 
 
