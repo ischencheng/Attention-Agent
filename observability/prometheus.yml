@@ -20,13 +20,6 @@ scrape_configs:
           env: local_lab
           component: kafka_broker
 
-  - job_name: bluesky_ingestor
-    static_configs:
-      - targets: ["bluesky-ingestor:8020"]
-        labels:
-          env: local_lab
-          component: bluesky_ingestor
-
   - job_name: fast_agent
     static_configs:
       - targets: ["fast-agent:8030"]
@@ -83,27 +76,6 @@ scrape_configs:
         labels:
           env: local_lab
           component: flink_taskmanager
-
-  - job_name: finnhub_ingestor
-    static_configs:
-      - targets: ["finnhub-ingestor:8021"]
-        labels:
-          env: local_lab
-          component: finnhub_ingestor
-
-  - job_name: polygon_news_ingestor
-    static_configs:
-      - targets: ["polygon-news-ingestor:8022"]
-        labels:
-          env: local_lab
-          component: polygon_news_ingestor
-
-  - job_name: twitter_ingestor
-    static_configs:
-      - targets: ["twitter-ingestor:8023"]
-        labels:
-          env: local_lab
-          component: twitter_ingestor
 
   - job_name: otel_collector
     static_configs:

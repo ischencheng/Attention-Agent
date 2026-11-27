@@ -168,41 +168,6 @@ services:
       kafka3:
         condition: service_healthy
 
-  bluesky-ingestor:
-    profiles: [extra-sources]
-    build:
-      context: ./bluesky-demo
-      dockerfile: Dockerfile
-    container_name: bluesky-ingestor
-    networks: [backend]
-    environment:
-      PYTHONUNBUFFERED: "1"
-      OTEL_SERVICE_NAME: bluesky-ingestor
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
-    command:
-      - "python"
-      - "bluesky_ingestor.py"
-      - "--bootstrap"
-      - "kafka1:19092,kafka2:19092,kafka3:19092"
-      - "--topic"
-      - "source_raw"
-      - "--jetstream-url"
-      - "wss://jetstream2.us-east.bsky.network/subscribe"
-      - "--metrics-port"
-      - "8020"
-    ports:
-      - "8020:8020"
-    restart: unless-stopped
-    depends_on:
-      kafka1:
-        condition: service_healthy
-      kafka2:
-        condition: service_healthy
-      kafka3:
-        condition: service_healthy
-      otel-collector:
-        condition: service_started
-
   flink-jobmanager:
     build:
       context: ./flink
@@ -490,103 +455,6 @@ services:
       otel-collector:
         condition: service_started
 
-  finnhub-ingestor:
-    profiles: [extra-sources]
-    build:
-      context: ./ingestors
-      dockerfile: Dockerfile
-    container_name: finnhub-ingestor
-    networks: [backend]
-    environment:
-      PYTHONUNBUFFERED: "1"
-      FINNHUB_API_KEY: "${FINNHUB_API_KEY:-}"
-    command:
-      - "python"
-      - "finnhub_ws.py"
-      - "--bootstrap"
-      - "kafka1:19092,kafka2:19092,kafka3:19092"
-      - "--topic"
-      - "source_raw"
-      - "--metrics-port"
-      - "8021"
-    ports:
-      - "8021:8021"
-    restart: unless-stopped
-    depends_on:
-      kafka1:
-        condition: service_healthy
-      kafka2:
-        condition: service_healthy
-      kafka3:
-        condition: service_healthy
-
-  polygon-news-ingestor:
-    profiles: [extra-sources]
-    build:
-      context: ./ingestors
-      dockerfile: Dockerfile
-    container_name: polygon-news-ingestor
-    networks: [backend]
-    environment:
-      PYTHONUNBUFFERED: "1"
-      POLYGON_API_KEY: "${POLYGON_API_KEY:-}"
-    command:
-      - "python"
-      - "polygon_news_poller.py"
-      - "--bootstrap"
-      - "kafka1:19092,kafka2:19092,kafka3:19092"
-      - "--topic"
-      - "source_raw"
-      - "--poll-interval-seconds"
-      - "60"
-      - "--metrics-port"
-      - "8022"
-    ports:
-      - "8022:8022"
-    restart: unless-stopped
-    depends_on:
-      kafka1:
-        condition: service_healthy
-      kafka2:
-        condition: service_healthy
-      kafka3:
-        condition: service_healthy
-
-  twitter-ingestor:
-    build:
-      context: ./ingestors
-      dockerfile: Dockerfile
-    container_name: twitter-ingestor
-    networks: [backend]
-    environment:
-      PYTHONUNBUFFERED: "1"
-      CARAVO_API_KEY: "${CARAVO_API_KEY:-}"
-    command:
-      - "python"
-      - "twitter_poller.py"
-      - "--bootstrap"
-      - "kafka1:19092,kafka2:19092,kafka3:19092"
-      - "--topic"
-      - "source_raw"
-      - "--twitter-username"
-      - "${TWITTER_FOLLOW_USER:-genhcnehcsi}"
-      - "--poll-interval-seconds"
-      - "1200"
-      - "--search-batch-size"
-      - "10"
-      - "--metrics-port"
-      - "8023"
-    ports:
-      - "8023:8023"
-    restart: unless-stopped
-    depends_on:
-      kafka1:
-        condition: service_healthy
-      kafka2:
-        condition: service_healthy
-      kafka3:
-        condition: service_healthy
-
   mid-agent:
     profiles: [container-agents]
     build:
@@ -779,7 +647,6 @@ services:
       - backend-fastapi
       - sink-consumer
       - postgres-exporter
-      - twitter-ingestor
       - otel-collector
 
   grafana:

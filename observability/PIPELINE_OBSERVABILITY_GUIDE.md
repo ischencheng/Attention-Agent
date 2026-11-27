@@ -1,6 +1,6 @@
 # Kafka Pipeline Observability Guide
 
-This guide defines the observability model for the Bluesky -> Kafka -> Flink -> Fast Agent -> Mid Agent -> Strong Agent -> Postgres pipeline.
+This guide defines the observability model for the X and YouTube -> Kafka -> Flink -> Fast Agent -> Mid Agent -> Strong Agent -> Postgres pipeline.
 
 It covers three layers:
 
@@ -26,19 +26,11 @@ audit traces does not validate this metrics catalog or its SLO queries.
 
 ## 2. Service metrics catalog
 
-### bluesky-ingestor
+### X and YouTube source collector
 
-- `bluesky_ingestor_events_received_total`: Jetstream events received.
-- `bluesky_ingestor_events_filtered_total{reason}`: events dropped by filter reason.
-- `bluesky_ingestor_raw_publish_success_total`: successful writes to `source_raw`.
-- `bluesky_ingestor_raw_publish_failed_total{error_type}`: failed writes to `source_raw`.
-- `bluesky_ingestor_reconnect_total`: reconnect attempts to Jetstream.
-- `bluesky_ingestor_last_event_unixtime`: timestamp of latest source event.
-
-Useful PromQL:
-
-- ingest throughput: `rate(bluesky_ingestor_raw_publish_success_total[5m])`
-- filter ratio: `sum(rate(bluesky_ingestor_events_filtered_total[5m])) / clamp_min(sum(rate(bluesky_ingestor_events_received_total[5m])), 0.000001)`
+The host supervisor writes per-platform poll status and Kafka delivery receipts
+to `environments/attention_judgment/runs/local-pipeline/social.log`.
+Check these receipts for source freshness and actual ingestion.
 
 ### flink-jobmanager / flink-taskmanager
 
@@ -220,7 +212,7 @@ The dashboard `pipeline-data-explorer.json` provides:
 After `docker compose up -d --build`:
 
 1. Prometheus targets should be `UP` for:
-   - `bluesky_ingestor`
+   - Host social collector logs (`social.log`)
    - `flink_jobmanager`
    - `flink_taskmanager`
    - `local_ml_filter`

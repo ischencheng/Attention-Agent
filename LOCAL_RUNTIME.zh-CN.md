@@ -5,7 +5,7 @@
 
 本地部署沿用项目的消息链路：
 
-`Twitter/官方 RSS → source_raw → Flink → source_clean → Codex 相关性过滤 → Fast → attention_tickets → Mid → annotations → Strong → decision_packets`
+`X / YouTube → source_raw → Flink → source_clean → 转发 → Fast → attention_tickets → Mid → annotations → Strong → decision_packets`
 
 通过过滤的原文同时进入本地语义向量库。PostgreSQL 保存原始内容、各级结果和 Mid/Strong 的长期状态。前端在 <http://localhost:5173>，API 在 <http://localhost:8000>，Flink 状态在 <http://localhost:8081>。
 
@@ -20,10 +20,16 @@ uv venv --python 3.12 .venv
 uv pip install --python .venv/bin/python -r scripts/requirements-local.txt
 npm install --prefix environments/attention_judgment/runs/runtime @openai/codex@0.163.0
 docker compose build
+```
+
+安装 [Agent Reach CLI](https://github.com/Panniantong/Agent-Reach)。在 `.env` 的 `ATTENTION_X_ACCOUNTS` 填 X 账号，在 `ATTENTION_YOUTUBE_CHANNELS` 填 YouTube `@handle` 或 `UC…` 频道 ID，多个目标用逗号分隔。留空会禁用该来源。X 需要执行 `agent-reach add twitter` 和 `agent-reach login twitter`，然后在打开的浏览器中手动登录。YouTube 读取公开视频简介及可用字幕。先预览，再按需启动流水线。
+
+```bash
+.venv/bin/python scripts/ingest_social.py --preview --limit 1
 .venv/bin/python scripts/local_pipeline.py start
 ```
 
-Twitter 使用进程环境中的 `CARAVO_API_KEY` 和原来的 `genhcnehcsi` 关注列表。官方 RSS 是补充来源，经同一条完整链路处理。RSS 每 20 分钟最多引入 24 个未见版本，后续逐步处理积压；原文保留的是发布者提供的 RSS 内容，不宣称已经读过链接全文。
+预览直接读来源，不写 Kafka 或投递账本。持续采集每 20 分钟轮询，默认每个账号或频道最多读三条。两路状态单独写入 `environments/attention_judgment/runs/local-pipeline/social.log`。缺登录或需要平台验证时，该来源会暂停，处理后先用预览确认，再重启采集器。没有字幕时保留视频简介并标 `metadata_only`。Kafka 确认收到后才登记去重。SEC、FRED 继续作为按需查证工具。
 
 `start` 启动 Docker 服务和一个有文件锁的宿主机 supervisor。重复调用不会重复开启 supervisor。模型网关使用随机本地 token；首次下载 embedding 模型时可能暂时未就绪，消费者保留消息并重试。分类调用按内容、角色、模型和提示版本缓存；模型失败不会伪装成过滤否决。
 

@@ -1,5 +1,6 @@
 services:
   replay-source:
+    profiles: [legacy-replay]
     build:
       context: ./validation/replay-source
       dockerfile: Dockerfile
@@ -29,6 +30,16 @@ services:
     restart: "no"
 
   bluesky-ingestor:
+    profiles: [legacy-replay]
+    build:
+      context: ./bluesky-demo
+      dockerfile: Dockerfile
+    container_name: bluesky-ingestor
+    networks: [backend]
+    environment:
+      PYTHONUNBUFFERED: "1"
+      OTEL_SERVICE_NAME: bluesky-ingestor
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
     command:
       - "python"
       - "bluesky_ingestor.py"
@@ -44,6 +55,17 @@ services:
       - "5"
       - "--produce-retry-backoff-seconds"
       - "0.5"
+    ports:
+      - "8020:8020"
+    restart: "no"
     depends_on:
+      kafka1:
+        condition: service_healthy
+      kafka2:
+        condition: service_healthy
+      kafka3:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
       replay-source:
         condition: service_started

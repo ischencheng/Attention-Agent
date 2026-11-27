@@ -17,7 +17,7 @@ the originals. A summary is a navigation aid, never an authoritative original.
 Research is topic-led, without a fixed portfolio or hard ticker filter. Preserve
 the existing topic scope: AI, earnings, guidance, capex, datacenters, storage,
 power, energy, nuclear, semiconductors, GPUs, inference, LLMs, margins, valuation,
-CPI, the Fed and yields. The separately configured Twitter follow list is another
+CPI, the Fed and yields. Configured X accounts and YouTube channels are another
 source of discoveries. Assets can emerge from a supported thesis; a theme need
 not name a tradable asset to deserve further research.
 

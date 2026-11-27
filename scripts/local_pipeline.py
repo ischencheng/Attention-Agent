@@ -2,7 +2,7 @@
 """Supervise the real local pipeline using the host's existing Codex login.
 
 Docker runs Kafka/Flink/workers/Postgres/UI. This process supervises the model
-gateway, primary-source ingestor and independent Mid/Strong schedules. Runtime
+gateway, social source collector and independent Mid/Strong schedules. Runtime
 state is ignored by Git. No credential files are read or copied.
 """
 from __future__ import annotations
@@ -36,7 +36,7 @@ PYTHON = ROOT / ".venv/bin/python"
 CODEX = ROOT / "environments/attention_judgment/runs/runtime/node_modules/.bin/codex"
 SERVICES = ["kafka1", "kafka2", "kafka3", "postgres", "otel-collector", "jaeger",
             "flink-jobmanager", "flink-taskmanager", "flink-job", "sink-consumer",
-            "local-ml-filter", "embed-worker", "fast-agent", "twitter-ingestor",
+            "local-ml-filter", "embed-worker", "fast-agent",
             "backend-fastapi", "frontend-react"]
 
 
@@ -360,9 +360,10 @@ def daemon():
             "gateway": [str(PYTHON), str(ROOT / "scripts/local_gateway.py"),
                         "--host", "0.0.0.0", "--port", "8765", "--codex-bin", str(CODEX),
                         "--data-dir", str(RUNTIME), "--timeout", "180", "--prewarm"],
-            "rss": [str(PYTHON), str(ROOT / "scripts/ingest_primary_rss.py")],
             "observability": [str(PYTHON), str(ROOT / "scripts/observability_exporter.py")],
         }
+        if any(os.getenv(name, "").strip() for name in ("ATTENTION_X_ACCOUNTS", "ATTENTION_YOUTUBE_CHANNELS")):
+            specs["social"] = [str(PYTHON), str(ROOT / "scripts/ingest_social.py")]
         next_run = {"mid": 0.0, "strong": 0.0, "evaluation": 0.0}
         last_start = {}
         active = {}
