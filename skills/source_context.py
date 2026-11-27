@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections import deque
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 import json
 import os
 import re
@@ -38,7 +39,8 @@ def extract_native_context(source, source_id, raw):
               "thread_id": None, "chat_id": None, "identity_status": "unsupported_source"}
     if source != "twitter" or not isinstance(raw, dict):
         return result
-    message = native_id(raw.get("rest_id"))
+    opencli = "rest_id" not in raw and isinstance(raw.get("text"), str)
+    message = native_id(raw.get("id" if opencli else "rest_id"))
     reply = raw.get("reply_to_results")
     parent = native_id(reply.get("rest_id")) if isinstance(reply, dict) else None
     details = raw.get("details")
@@ -47,6 +49,17 @@ def extract_native_context(source, source_id, raw):
         try:
             result["event_ts"] = datetime.fromtimestamp(milliseconds / 1000, timezone.utc).isoformat()
         except (ValueError, OverflowError, OSError):
+            pass
+    elif opencli and isinstance(raw.get("created_at"), str):
+        try:
+            value = raw["created_at"]
+            try:
+                parsed = datetime.fromisoformat(value)
+            except ValueError:
+                parsed = parsedate_to_datetime(value)
+            if parsed.tzinfo is not None:
+                result["event_ts"] = parsed.astimezone(timezone.utc).isoformat()
+        except (ValueError, OverflowError):
             pass
     result.update({"message_id": message, "parent_message_id": parent,
                    "identity_status": "verified_native_identity" if message and source_id == f"twitter-{message}"
@@ -62,7 +75,8 @@ def source_text(raw):
         note = note.get(key, {}) if isinstance(note, dict) else {}
     details = raw.get("details", {})
     return note.get("text") if isinstance(note, dict) and isinstance(note.get("text"), str) else (
-        details.get("full_text") if isinstance(details, dict) and isinstance(details.get("full_text"), str) else None)
+        details.get("full_text") if isinstance(details, dict) and isinstance(details.get("full_text"), str)
+        else raw.get("text") if isinstance(raw.get("text"), str) else None)
 
 
 def display_raw(raw, context):

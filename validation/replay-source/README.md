@@ -1,6 +1,9 @@
 # Jetstream Replay Source
 
-Lightweight websocket replay source for `bluesky_ingestor.py` input validation.
+Historical websocket replay source for `bluesky_ingestor.py` input validation.
+The fixture and its ingestor live in the explicit `legacy-replay` Compose profile.
+Run it only with a disposable test stack: it publishes synthetic records to
+`source_raw`.
 
 ## What It Does
 
@@ -19,20 +22,22 @@ Each frame is validated as JSON text before serving.
 
 ## Quick Start (Docker Compose Service)
 
-Use replay mode without changing the base compose file:
+From the repository root, start the historical fixture and its dependencies:
 
 ```bash
-docker compose -f kafka-cluster/docker-compose.yaml -f kafka-cluster/docker-compose.replay.yaml up -d
+docker compose -f docker-compose.yaml -f docker-compose.replay.yaml \
+  --profile legacy-replay up -d --build replay-source bluesky-ingestor
 ```
 
-This starts `replay-source` and overrides `bluesky-ingestor --jetstream-url` to:
+The overlay defines both services and points `bluesky-ingestor --jetstream-url` to:
 
 - `ws://replay-source:9001/subscribe`
 
-Stop replay mode:
+Stop the fixture services while preserving the test stack and data:
 
 ```bash
-docker compose -f kafka-cluster/docker-compose.yaml -f kafka-cluster/docker-compose.replay.yaml down
+docker compose -f docker-compose.yaml -f docker-compose.replay.yaml \
+  --profile legacy-replay stop replay-source bluesky-ingestor
 ```
 
 ## Quick Start (Local Python)
@@ -40,14 +45,14 @@ docker compose -f kafka-cluster/docker-compose.yaml -f kafka-cluster/docker-comp
 1. Install dependency:
 
 ```bash
-pip install -r kafka-cluster/validation/replay-source/requirements.txt
+pip install -r validation/replay-source/requirements.txt
 ```
 
 2. Run replay source:
 
 ```bash
-python kafka-cluster/validation/replay-source/jetstream_replay_server.py \
-  --dataset kafka-cluster/validation/golden-dataset/golden_samples.json \
+python validation/replay-source/jetstream_replay_server.py \
+  --dataset validation/golden-dataset/golden_samples.json \
   --host 0.0.0.0 \
   --port 9001 \
   --path /subscribe \
@@ -58,7 +63,7 @@ python kafka-cluster/validation/replay-source/jetstream_replay_server.py \
 3. Point ingestor to replay source:
 
 ```bash
-python kafka-cluster/bluesky-demo/bluesky_ingestor.py \
+python bluesky-demo/bluesky_ingestor.py \
   --jetstream-url ws://127.0.0.1:9001/subscribe
 ```
 
@@ -74,8 +79,8 @@ python kafka-cluster/bluesky-demo/bluesky_ingestor.py \
 ## Example: Finite, Controlled Replay
 
 ```bash
-python kafka-cluster/validation/replay-source/jetstream_replay_server.py \
-  --dataset kafka-cluster/validation/golden-dataset/golden_samples.json \
+python validation/replay-source/jetstream_replay_server.py \
+  --dataset validation/golden-dataset/golden_samples.json \
   --messages-per-second 5 \
   --repeat-each 2 \
   --max-loops 3 \

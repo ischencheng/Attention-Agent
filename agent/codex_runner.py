@@ -363,7 +363,7 @@ def cycle_prompt(role, state_id, research_context=DEFAULT_RESEARCH_CONTEXT):
     return common + (
         "Discover research topics from the incoming evidence; there is no fixed portfolio or ticker filter. "
         f"Research topics: {research_context or DEFAULT_RESEARCH_CONTEXT}. Assets may emerge from a supported thesis. "
-        "The separately configured Twitter follow list remains a source, not an asset whitelist. "
+        "Configured X accounts and YouTube channels supply information. Asset discovery follows the evidence. "
     ) + STRONG_RULES
 
 

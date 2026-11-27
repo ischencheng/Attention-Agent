@@ -79,7 +79,6 @@
       "id": 7,
       "options": { "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "single", "sort": "none" } },
       "targets": [
-        { "expr": "rate(bluesky_ingestor_raw_publish_success_total[5m])", "legendFormat": "ingestor_raw_success", "refId": "A" },
         { "expr": "rate(narrative_clue_out_total{status=\"success\"}[5m])", "legendFormat": "narrative_clue_out", "refId": "B" },
         { "expr": "rate(event_packet_out_total{status=\"success\"}[5m])", "legendFormat": "event_packet_out", "refId": "C" },
         { "expr": "rate(decision_packet_out_total{status=\"success\"}[5m])", "legendFormat": "decision_packet_out", "refId": "D" }
@@ -215,20 +214,6 @@
         }
       ],
       "title": "PostgreSQL Cache Hit Ratio",
-      "type": "timeseries"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 36 },
-      "id": 18,
-      "options": { "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "single", "sort": "none" } },
-      "targets": [
-        { "expr": "rate(bluesky_ingestor_events_received_total[5m])", "legendFormat": "events_received", "refId": "A" },
-        { "expr": "sum by (reason) (rate(bluesky_ingestor_events_filtered_total[5m]))", "legendFormat": "filtered {{reason}}", "refId": "B" },
-        { "expr": "rate(bluesky_ingestor_reconnect_total[5m])", "legendFormat": "reconnect/s", "refId": "C" }
-      ],
-      "title": "Ingestor Health",
       "type": "timeseries"
     }
   ],

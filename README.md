@@ -97,7 +97,8 @@ complete evidence matrix and the boundaries of each check.
 
 ## Production and replay
 
-The production application receives multiple information sources through
+The production application collects configured X accounts and YouTube channels
+through the backends used by Agent Reach. It sends the originals through
 Kafka/Flink, runs Fast/Mid/Strong workers, persists state in PostgreSQL, and
 exposes it through FastAPI and a React dashboard. The
 [local runtime guide](LOCAL_RUNTIME.md) describes the actual services and

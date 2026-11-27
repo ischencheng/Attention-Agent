@@ -44,14 +44,27 @@ def source_record(row):
     published = timestamp(payload.get("timestamp")).isoformat()
     if timestamp(published) > timestamp(available):
         raise ValueError("publication occurs after the captured receipt")
-    title = raw.get("title") or payload.get("data", {}).get("title") or native_id
+    data = payload.get("data") or {}
+    title = raw.get("title") or data.get("title") or native_id
+    coverage = "Native source text or original JSON; full original retained. Official publisher identity does not certify a causal claim or grant an automatic investment gate."
     if source == "twitter":
-        if native_id != "twitter-" + str(raw.get("rest_id")):
+        opencli = data.get("backend") == "opencli"
+        provider_id = raw.get("id" if opencli else "rest_id")
+        if provider_id is None or native_id != "twitter-" + str(provider_id):
             raise ValueError("Twitter native and envelope identities disagree")
-        note = raw.get("note_tweet", {}).get("note_tweet_results", {}).get("result", {})
-        body = note.get("text") or raw.get("details", {}).get("full_text")
+        if opencli:
+            body = raw.get("text")
+        else:
+            note = raw.get("note_tweet", {}).get("note_tweet_results", {}).get("result", {})
+            body = note.get("text") or raw.get("details", {}).get("full_text")
         if not isinstance(body, str) or not body.strip():
             raise ValueError("Twitter original lacks native text")
+    elif source == "youtube" and data.get("backend") == "yt-dlp":
+        if not isinstance(raw.get("id"), str) or native_id != "youtube-" + raw["id"]:
+            raise ValueError("YouTube native and envelope identities disagree")
+        body = "\n\n".join(value for value in (raw.get("description"), raw.get("transcript"))
+                           if isinstance(value, str) and value.strip()) or str(title)
+        coverage = "YouTube description and captured captions, when present. An unknown exact publication time uses the recorded collector observation as a conservative bound."
     elif any(key in raw for key in ("content_html", "description_html", "description")):
         body = _plain(raw.get("content_html") or raw.get("description_html") or raw.get("description"))
     else:
@@ -69,7 +82,7 @@ def source_record(row):
             "payload": payload,
             "receipt": {"kind": "postgres_raw_messages", "raw_id": row["id"], "created_at": available,
                         "payload_sha256": digest(payload)},
-            "projection_coverage": "Native source text or original JSON; full original retained. Official publisher identity does not certify a causal claim or grant an automatic investment gate."}
+            "projection_coverage": coverage}
 
 
 def export_rows(rows, start_at, end_at, *, collected_at=None, source_names=None):

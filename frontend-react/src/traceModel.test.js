@@ -3,6 +3,12 @@ import assert from "node:assert/strict";
 import { auditTraceLink, observabilityLabel } from "./traceModel.js";
 import { classificationPresentation, evidenceLabel, isInputRelay, lastRevision, rawRecordId, recordKey, researchTitle, routingDisposition, routingGroups, routingStageLabel, safeSourceUrl, sourceText, sourceTimes, ticketClassifications, traceStages } from "./traceModel.js";
 
+test("YouTube originals show the description and available captions", () => {
+  const data = { backend: "yt-dlp", title: "Actual title", text: "derived excerpt" };
+  assert.equal(sourceText({ source: "youtube", data, raw: { description: "Actual description", transcript: "Caption" } }), "Actual description\n\nCaption");
+  assert.equal(sourceText({ source: "youtube", data, raw: {} }), "Actual title");
+});
+
 test("missing routing telemetry cannot imply rejection", () => {
   assert.equal(routingDisposition({}), "Not recorded");
   assert.equal(routingDisposition({ verdict: false }), "Filtered out");

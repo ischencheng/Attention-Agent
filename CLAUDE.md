@@ -4,7 +4,7 @@ Development guidance for this repository. Runtime Mid/Strong instructions are in
 
 ## Overview
 
-AI Attention Proxy — a multi-source information consumption pipeline built on a 3-node KRaft Kafka cluster. It ingests real-time data from Bluesky, Twitter, Finnhub (stock prices), and Polygon.io (financial news), runs them through a multi-stage LLM processing chain, and surfaces investment-relevant signals in a React frontend. Mid/strong agent work is delegated to Codex CLI agents via Python skills.
+AI Attention Proxy collects configured X accounts and YouTube channels, passes originals through Kafka and Flink, and runs Fast, Mid and Strong research stages. The dashboard reads the saved PostgreSQL state through FastAPI.
 
 ## Key Commands
 
@@ -104,13 +104,9 @@ LLM quality, or trading returns.
 ### Data Flow (Kafka Topics)
 
 ```
-Multi-Source Ingestors
-  bluesky-ingestor   (WebSocket push)      ─┐
-  finnhub-ingestor   (WebSocket push)       ├──> source_raw
-  polygon-news-ingestor (poll every 60s)    │
-  twitter-ingestor   (poll every 20m)      ─┘
+X and YouTube → scripts/ingest_social.py → source_raw
     -> Flink job (PyFlink)        -> source_clean
-    -> local-ml-filter (Python)   -> fastagent_input   [Gemini pre-filter, threshold 0.55]
+    -> local-ml-filter (relay)   -> fastagent_input
     -> embed-worker (Python)      -> vector_embedding  [from fastagent_input, Gemini embedding-001, 768-dim]
     -> fast-agent (Python)        -> attention_ticket  [Gemini flash-lite, threshold 0.60]
     -> external agents (skills)   -> annotations + decision_packet
@@ -122,21 +118,14 @@ Multi-Source Ingestors
 
 All messages use a unified envelope: `{source, source_id, content_type, timestamp, data, raw}`
 
-| content_type   | source    | ingestor               |
-|----------------|-----------|------------------------|
-| social_post    | bluesky   | bluesky-ingestor       |
-| social_post    | twitter   | twitter-ingestor       |
-| price_tick     | finnhub   | finnhub-ingestor       |
-| news_article   | polygon   | polygon-news-ingestor  |
+| content_type | source | Coverage |
+|---|---|---|
+| social_post | twitter | Configured account timeline |
+| news_article | youtube | Video description and available captions |
 
 ### Component Roles
 
-**Ingestors** (`ingestors/` + `bluesky-demo/`):
-- **bluesky-demo/bluesky_ingestor.py** — WebSocket client for Bluesky Jetstream; produces to `source_raw`; metrics on `:8020`
-- **ingestors/finnhub_ws.py** — WebSocket client for Finnhub real-time stock trades; produces `price_tick` to `source_raw`; metrics on `:8021`
-- **ingestors/polygon_news_poller.py** — Polls Polygon.io REST API for financial news; produces `news_article` to `source_raw`; metrics on `:8022`
-- **ingestors/twitter_poller.py** — Polls Twitter via Caravo API (twitter241/search-v3); produces `social_post` to `source_raw`; metrics on `:8023`
-- **ingestors/base.py** — Shared base: Kafka producer setup, topic creation, envelope helpers
+**Live source collector** (`scripts/ingest_social.py`): Agent Reach calls OpenCLI for X and yt-dlp for YouTube. The host supervisor runs the collector for configured sources. The collector saves delivery progress after Kafka acknowledges the original. See [LOCAL_RUNTIME.md](LOCAL_RUNTIME.md#live-sources).
 
 **Processing pipeline**:
 - **flink/bluesky_flink_job.py** — PyFlink streaming job; normalizes messages, keyword-filters for investment relevance, passes `price_tick` through unconditionally; fans out to `source_clean`
@@ -180,10 +169,7 @@ Required secrets (set in `.env`):
 | Variable          | Required | Used By                |
 |-------------------|----------|------------------------|
 | `GEMINI_API_KEY`  | Yes      | ML workers, fast-agent, agents |
-| `FINNHUB_API_KEY` | Optional | finnhub-ingestor       |
-| `POLYGON_API_KEY` | Optional | polygon-news-ingestor  |
-| `CARAVO_API_KEY`  | Optional | twitter-ingestor       |
 | `CODEX_API_KEY` | Optional | Mid/Strong hosted model auth; alternatively log in through each container CLI |
-| `TWITTER_FOLLOW_USER` | Optional | twitter-ingestor (default: genhcnehcsi) |
+| `ATTENTION_X_ACCOUNTS` / `ATTENTION_YOUTUBE_CHANNELS` | Optional | Live source watchlists |
 | `RESEARCH_CONTEXT` | Optional | Original topic interests, not a ticker allowlist |
 | `CODEX_MODEL` / role overrides | Optional | Account-available model selection |
