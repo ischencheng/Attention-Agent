@@ -78,6 +78,9 @@ export function routingGroups(items) {
 export function sourceText(payload = {}) {
   const raw = payload.raw || {};
   const data = payload.data || {};
+  if (payload.source === "youtube" && data.backend === "yt-dlp") {
+    return [raw.description, raw.transcript].filter(Boolean).join("\n\n") || data.title || null;
+  }
   // Preserve the original long-form source where the API returned one.
   return raw.note_tweet?.note_tweet_results?.result?.text || raw.details?.full_text ||
     raw.full_text || raw.text || raw.body || raw.description || raw.summary ||

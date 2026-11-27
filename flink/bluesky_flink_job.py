@@ -74,11 +74,11 @@ def process_raw(payload: Dict[str, Any], keywords: set[str]) -> Optional[Dict[st
     if content_type == "price_tick":
         return payload
 
-    # Twitter is selected by following list; SEC/FRED originals are requested
+    # Social sources are explicitly selected; SEC/FRED originals are requested
     # explicitly after research discovery. Preserve these records for downstream
     # Codex filtering even when structured metadata has no topic keywords.
     source = payload.get("source", "")
-    if source in {"twitter", "sec_edgar", "fred"}:
+    if source in {"twitter", "youtube", "sec_edgar", "fred"}:
         return payload
 
     # For other social_post and news_article, apply keyword filter
