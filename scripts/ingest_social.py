@@ -186,7 +186,7 @@ def version_key(record):
 
 def collect(accounts, channels, limit, languages, stop, paused, video_cache):
     records, coverage = {}, []
-    active_videos = set()
+    cache_limit = max(1, 2 * len(channels) * limit)
     for source, targets in (("twitter", accounts), ("youtube", channels)):
         if not targets:
             coverage.append({"source": source, "status": "not_configured"})
@@ -213,15 +213,17 @@ def collect(accounts, channels, limit, languages, stop, paused, video_cache):
                     for video_id in video_ids(target, limit):
                         if stop.is_set():
                             break
-                        active_videos.add(video_id)
                         try:
-                            entry = video_cache.get(video_id)
+                            entry = video_cache.pop(video_id, None)
                             if entry and time.monotonic() < entry[2]:
                                 record, caption_error, _ = entry
                             else:
                                 record, caption_error = youtube_original(video_id, languages)
                                 ttl = 3600 if caption_error else 21600
-                                video_cache[video_id] = (record, caption_error, time.monotonic() + ttl)
+                                entry = (record, caption_error, time.monotonic() + ttl)
+                            video_cache[video_id] = entry
+                            if len(video_cache) > cache_limit:
+                                del video_cache[next(iter(video_cache))]
                         except SourceError as exc:
                             if str(exc) in TERMINAL | {"RATE_LIMITED"}:
                                 raise
@@ -238,8 +240,6 @@ def collect(accounts, channels, limit, languages, stop, paused, video_cache):
             coverage.append(status)
             if status.get("code") in TERMINAL | {"RATE_LIMITED"}:
                 break
-    for video_id in video_cache.keys() - active_videos:
-        del video_cache[video_id]
     return records, coverage
 
 

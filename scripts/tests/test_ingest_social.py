@@ -46,6 +46,13 @@ class CollectorTests(unittest.TestCase):
             social.collect([], ["@NVIDIA"], 1, "en", threading.Event(), {}, cache)
             self.assertEqual(hydrate.call_count, 2)
 
+    def test_rate_limit_keeps_the_cache_for_unreached_channels(self):
+        cache = {"z7tcQiyLK8E": ({"source_id": "youtube-z7tcQiyLK8E"}, None, 999)}
+        with patch.object(social, "video_ids", side_effect=social.SourceError("RATE_LIMITED")):
+            _, coverage = social.collect([], ["@First", "@Second"], 1, "en", threading.Event(), {}, cache)
+        self.assertEqual(list(cache), ["z7tcQiyLK8E"])
+        self.assertEqual([row["target"] for row in coverage if row["source"] == "youtube"], ["@First"])
+
     def test_reach_refuses_fallback_and_exposes_only_error_code(self):
         result = subprocess.CompletedProcess([], 1, stdout=json.dumps({
             "schema_version": 1, "channel": "twitter", "action": "tweets", "ok": False,
@@ -84,13 +91,21 @@ class CollectorTests(unittest.TestCase):
         class Producer:
             ok = False
             sends = 0
+            error = None
+            sync_error = None
 
             def produce(self, topic, *, key, value, on_delivery):
                 self.sends += 1
                 self.callback = on_delivery
+                if self.sync_error:
+                    error, self.sync_error = self.sync_error, None
+                    raise social.KafkaException(error)
 
             def flush(self, timeout):
-                self.callback(None if self.ok else object(), Message())
+                error, self.error = self.error, None
+                if error is None and not self.ok:
+                    error = object()
+                self.callback(error, Message())
                 return 0
 
         state = sqlite3.connect(":memory:")
@@ -124,6 +139,17 @@ class CollectorTests(unittest.TestCase):
         self.assertEqual(mixed["rejected"], [{"source_id": "twitter-124", "code": "RECORD_TOO_LARGE"}])
         self.assertEqual([record["source_id"] for record in mixed["acknowledged"]], ["twitter-125"])
         self.assertEqual(producer.sends, 5)
+
+        size_error = social.KafkaError(social.KafkaError.MSG_SIZE_TOO_LARGE)
+        raw["text"] = "Broker size callback"
+        producer.error = size_error
+        self.assertEqual(publish()["rejected"], [{"source_id": "twitter-123", "code": "RECORD_TOO_LARGE"}])
+        producer.sync_error = size_error
+        self.assertEqual(publish()["rejected"], [{"source_id": "twitter-123", "code": "RECORD_TOO_LARGE"}])
+        producer.error = social.KafkaError(social.KafkaError._TRANSPORT)
+        self.assertEqual(publish()["failed"], 1)
+        self.assertEqual(state.execute("SELECT count(*) FROM delivered").fetchone()[0], 4)
+        self.assertEqual(len(publish()["acknowledged"]), 1)
 
 
 if __name__ == "__main__":
