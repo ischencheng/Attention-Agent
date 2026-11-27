@@ -74,7 +74,9 @@ net portfolio return at a fixed horizon.
 The [evaluation card](environments/research_portfolio/EVALUATION.md) defines
 source and price cutoffs, archive eligibility, and accounting checks. The
 [machine-readable run result](environments/research_portfolio/results/2026-10-29-qwen14b-l40s-v1.json)
-includes model identity, validity flags, and aggregate counts.
+includes model identity, validity flags, and aggregate counts. The reconciler
+checks account arithmetic. Assessing investment performance requires held-out
+market episodes.
 
 <details>
 <summary>Inspect the files a run produces</summary>
@@ -103,10 +105,10 @@ and [contributing guide](CONTRIBUTING.md).
 ## Tests
 
 ```bash
-python -m pip install -e '.[archive]'
+python -m pip install -e '.[archive]' confluent-kafka
+python -m unittest discover -s scripts/tests -v
 python -m unittest discover -s environments/research_portfolio/tests -v
 ```
 
-Tests exercise future-data isolation, research prerequisites, paper execution,
-corporate actions, and independent reconciliation. CI also generates the
+These commands run the contract suites used in CI. CI also generates the
 synthetic replay exhibit.
