@@ -20,7 +20,7 @@ from psycopg2.extras import Json
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "skills"))
-from source_context import extract_native_context, source_context
+from source_context import extract_native_context, source_context, source_text
 from evidence import digest
 
 
@@ -32,6 +32,16 @@ def tweet(message, parent=None, *, milliseconds=1700000000000, text="Original so
 
 
 class ExtractionTests(unittest.TestCase):
+    def test_opencli_original_preserves_source_identity_without_inferred_reply(self):
+        row = {"id": "254", "text": "Observed tweet", "created_at": "Tue Nov 24 12:34:56 +0000 2026",
+               "quoted_tweet": {"id": "253"}}
+        context = extract_native_context("twitter", "twitter-254", row)
+        self.assertEqual(context["identity_status"], "verified_native_identity")
+        self.assertEqual(context["event_ts"], "2026-11-24T12:34:56+00:00")
+        self.assertIsNone(context["parent_message_id"])
+        self.assertEqual(source_text(row), "Observed tweet")
+        self.assertEqual(extract_native_context("twitter", "twitter-253", row)["identity_status"], "identity_mismatch")
+
     def test_nested_quoted_post_never_supplies_message_identity_or_time(self):
         raw = {"quotedPostResults": {"result": tweet(9, 8)}, "reply_to_results": {"rest_id": "7"}}
         context = extract_native_context("twitter", "twitter-9", raw)

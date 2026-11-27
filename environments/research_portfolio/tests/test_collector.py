@@ -2,7 +2,7 @@ from copy import deepcopy
 from datetime import datetime, timezone
 import unittest
 
-from environments.research_portfolio.collector import export_rows, market_bundle
+from environments.research_portfolio.collector import export_rows, market_bundle, source_record
 
 
 def raw_row():
@@ -13,6 +13,23 @@ def raw_row():
 
 
 class CollectorTests(unittest.TestCase):
+    def test_new_social_projection_retains_original_content_and_checks_identity(self):
+        for source, backend, raw, expected in (
+            ("twitter", "opencli", {"id": "81", "text": "Original post"}, "Original post"),
+            ("youtube", "yt-dlp", {"id": "z7tcQiyLK8E", "description": "Description", "transcript": "Captions"},
+             "Description\n\nCaptions"),
+        ):
+            with self.subTest(source=source):
+                row = raw_row()
+                row["raw"] = row["payload"]["raw"] = raw
+                row["payload"].update(source=source, source_id=f"{source}-{raw['id']}", data={"backend": backend})
+                result = source_record(row)
+                self.assertEqual(result["body"], expected)
+                self.assertEqual(result["raw"], raw)
+                row["payload"]["source_id"] = f"{source}-different"
+                with self.assertRaisesRegex(ValueError, "identities disagree"):
+                    source_record(row)
+
     def test_export_preserves_real_receipt_and_full_raw_with_readable_projection(self):
         row = raw_row()
         result = export_rows([row], "2026-10-22T00:00:00Z", "2026-10-23T00:00:00Z",

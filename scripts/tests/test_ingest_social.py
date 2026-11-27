@@ -23,7 +23,7 @@ class CollectorTests(unittest.TestCase):
         with patch.object(social, "reach", side_effect=reach), patch.object(
             social, "video_ids", return_value=["z7tcQiyLK8E"]
         ):
-            records, coverage = social.collect(["nvidia", "openai"], ["@NVIDIA"], 1, "en", threading.Event(), paused)
+            records, coverage = social.collect(["nvidia", "openai"], ["@NVIDIA"], 1, "en", threading.Event(), paused, {})
         self.assertEqual([(row["source"], row["status"]) for row in coverage],
                          [("twitter", "failed"), ("youtube", "ok")])
         self.assertEqual(paused, {"twitter": "NEED_LOGIN"})
@@ -32,6 +32,19 @@ class CollectorTests(unittest.TestCase):
         self.assertEqual(record["data"]["published_at"], "2026-11-24")
         self.assertEqual(record["timestamp"], record["data"]["observed_at"])
         self.assertEqual(record["data"]["raw_sha256"], social.digest(record["raw"]))
+
+    def test_recent_video_reuses_hydrated_caption_and_expires(self):
+        cache = {}
+        result = {"source": "youtube", "source_id": "youtube-z7tcQiyLK8E", "raw": {"id": "z7tcQiyLK8E"}}
+        with patch.object(social, "youtube_original", return_value=(result, None)) as hydrate, patch.object(
+            social, "video_ids", return_value=["z7tcQiyLK8E"]
+        ), patch.object(social.time, "monotonic", return_value=0) as clock:
+            for _ in range(2):
+                social.collect([], ["@NVIDIA"], 1, "en", threading.Event(), {}, cache)
+            self.assertEqual(hydrate.call_count, 1)
+            clock.return_value = 21601
+            social.collect([], ["@NVIDIA"], 1, "en", threading.Event(), {}, cache)
+            self.assertEqual(hydrate.call_count, 2)
 
     def test_reach_refuses_fallback_and_exposes_only_error_code(self):
         result = subprocess.CompletedProcess([], 1, stdout=json.dumps({
@@ -82,17 +95,17 @@ class CollectorTests(unittest.TestCase):
 
         state = sqlite3.connect(":memory:")
         self.addCleanup(state.close)
-        state.execute("CREATE TABLE delivered (version TEXT PRIMARY KEY, source_id, topic, partition, offset, acknowledged_at)")
+        state.execute("CREATE TABLE delivered (version, source_id, topic, partition, offset, acknowledged_at, PRIMARY KEY (version, topic))")
         producer = Producer()
         stop = threading.Event()
         raw = {"id": "123", "text": "Original", "author": "nvidia", "likes": 1,
                "created_at": "Tue Nov 24 12:34:56 +0000 2026"}
 
-        def publish():
+        def publish(topic="source_raw"):
             record = social.tweet_original({"raw": raw.copy()}, "2026-11-27T12:00:00+00:00")
             self.assertEqual(record["timestamp"], "2026-11-24T12:34:56+00:00")
             self.assertEqual(record["source_id"], "twitter-123")
-            return social.publish(producer, state, "source_raw", {social.version_key(record): record}, stop)
+            return social.publish(producer, state, topic, {social.version_key(record): record}, stop)
 
         self.assertEqual(publish()["failed"], 1)
         self.assertEqual(state.execute("SELECT count(*) FROM delivered").fetchone()[0], 0)
@@ -102,7 +115,15 @@ class CollectorTests(unittest.TestCase):
         self.assertEqual(publish()["already_delivered"], 1)
         raw["text"] = "Edited original"
         self.assertEqual(len(publish()["acknowledged"]), 1)
-        self.assertEqual(producer.sends, 3)
+        self.assertEqual(len(publish("test_topic")["acknowledged"]), 1)
+        batch = {}
+        for native_id, content in (("124", "x" * social.MAX_RECORD_BYTES), ("125", "Next original")):
+            record = social.tweet_original({"raw": {**raw, "id": native_id, "text": content}}, social.now())
+            batch[social.version_key(record)] = record
+        mixed = social.publish(producer, state, "source_raw", batch, stop)
+        self.assertEqual(mixed["rejected"], [{"source_id": "twitter-124", "code": "RECORD_TOO_LARGE"}])
+        self.assertEqual([record["source_id"] for record in mixed["acknowledged"]], ["twitter-125"])
+        self.assertEqual(producer.sends, 5)
 
 
 if __name__ == "__main__":

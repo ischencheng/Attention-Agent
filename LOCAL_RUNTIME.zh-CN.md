@@ -22,7 +22,7 @@ npm install --prefix environments/attention_judgment/runs/runtime @openai/codex@
 docker compose build
 ```
 
-安装 [Agent Reach CLI](https://github.com/Panniantong/Agent-Reach)。在 `.env` 的 `ATTENTION_X_ACCOUNTS` 填 X 账号，在 `ATTENTION_YOUTUBE_CHANNELS` 填 YouTube `@handle` 或 `UC…` 频道 ID，多个目标用逗号分隔。留空会禁用该来源。X 需要执行 `agent-reach add twitter` 和 `agent-reach login twitter`，然后在打开的浏览器中手动登录。YouTube 读取公开视频简介及可用字幕。先预览，再按需启动流水线。
+安装 [Agent Reach CLI](https://github.com/Panniantong/Agent-Reach)。在 `.env` 的 `ATTENTION_X_ACCOUNTS` 填 X 账号，在 `ATTENTION_YOUTUBE_CHANNELS` 填 YouTube `@handle` 或 `UC…` 频道 ID，多个目标用逗号分隔。留空会禁用该来源。X 需要执行 `agent-reach add twitter` 和 `agent-reach login twitter`，然后在打开的浏览器中手动登录。YouTube 读取频道 Videos 标签内的普通视频简介及可用字幕。先预览，再按需启动流水线。旧部署升级时，先停旧服务，然后执行 `docker compose build flink-job` 构建包含新路由的 Flink 镜像。
 
 ```bash
 .venv/bin/python scripts/ingest_social.py --preview --limit 1

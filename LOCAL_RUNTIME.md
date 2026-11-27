@@ -30,8 +30,9 @@ with 1.6.1). Supply comma-separated handles in `ATTENTION_X_ACCOUNTS` and
 YouTube `@handles` or `UC…` channel IDs in `ATTENTION_YOUTUBE_CHANNELS` in
 `.env`. Empty lists disable that platform. For X, run `agent-reach add twitter`
 and `agent-reach login twitter`, then sign in in the browser yourself. The
-collector uses Agent Reach's OpenCLI timeline action. For public YouTube videos,
-yt-dlp lists the newest uploads and Agent Reach reads the metadata and captions.
+collector uses Agent Reach's OpenCLI timeline action. For YouTube, yt-dlp lists
+the newest entries on each channel's Videos tab. Agent Reach reads their metadata
+and captions. The collector polls standard videos from that tab.
 The repository reads the CLI's JSON output directly.
 
 ```sh
@@ -48,12 +49,15 @@ the collector. After resolving it, verify with preview and restart the collector
 YouTube records without available captions carry `metadata_only`. Publication
 dates supplied at day precision remain dates. The raw envelope uses collection
 time as its event timestamp when no exact publication time is available. Repeat
-content is skipped after Kafka acknowledges the original. SEC and FRED remain
-available to research agents as on-demand evidence tools.
+content is skipped after Kafka acknowledges the original. Recent video metadata
+and captions are reused between polls. Oversized records are reported in the log
+and later records continue to Kafka. SEC and FRED remain available to research
+agents as on-demand evidence tools.
 
 When upgrading a running older deployment, stop its supervisor and Compose
-services from the previous checkout before starting this version. The existing
-PostgreSQL, Kafka and evaluation data can be reused.
+services from the previous checkout. Run `docker compose build flink-job` in
+the new checkout before starting so YouTube takes the updated Flink route. The
+existing PostgreSQL, Kafka and evaluation data can be reused.
 
 Copy the relevant settings from `.env.example` into the ignored `.env`:
 

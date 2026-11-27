@@ -212,7 +212,6 @@ The dashboard `pipeline-data-explorer.json` provides:
 After `docker compose up -d --build`:
 
 1. Prometheus targets should be `UP` for:
-   - Host social collector logs (`social.log`)
    - `flink_jobmanager`
    - `flink_taskmanager`
    - `local_ml_filter`
@@ -228,6 +227,7 @@ After `docker compose up -d --build`:
 3. Jaeger should show recorded routing/cycle spans at their actual timestamps.
    Verify a real relay, Fast rejection, successful cycle and failed cycle by
    their exact audit IDs. Confirm those IDs still resolve after a Jaeger restart.
+4. If a live source is configured, verify its latest poll and Kafka receipts in `social.log`.
 
 ## 7. Recommended next hardening steps
 

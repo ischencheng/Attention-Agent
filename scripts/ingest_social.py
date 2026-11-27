@@ -17,6 +17,9 @@ import sqlite3
 import subprocess
 import sys
 import threading
+import time
+
+from confluent_kafka import KafkaError, KafkaException, Producer
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_STATE = ROOT / "environments/attention_judgment/runs/production/social/delivered.sqlite3"
@@ -25,6 +28,8 @@ ACCOUNT = re.compile(r"[A-Za-z0-9_]{1,15}")
 CHANNEL = re.compile(r"(?:@[\w.-]{1,100}|UC[A-Za-z0-9_-]{22})")
 TERMINAL = {"NEED_SETUP", "NEED_LOGIN", "PLATFORM_BLOCKED"}
 ERROR_CODES = TERMINAL | {"RATE_LIMITED", "NOT_FOUND", "BAD_INPUT", "UPSTREAM_BROKEN", "BUSY", "TIMEOUT"}
+# Leave headroom for Kafka record overhead under the broker's 1 MiB limit.
+MAX_RECORD_BYTES = 900_000
 COMMAND_ENV = ("HOME", "PATH", "TMPDIR", "LANG", "LC_ALL", "SSL_CERT_FILE", "SSL_CERT_DIR",
                "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy")
 
@@ -58,7 +63,8 @@ def reach(channel, action, *args):
     executable = os.environ.get("ATTENTION_REACH_BIN") or shutil.which("agent-reach")
     executable = executable or str(Path.home() / ".local/bin/agent-reach")
     backend = "opencli" if channel == "twitter" else "yt-dlp"
-    result = run_command([executable, channel, action, *args, "--backend", backend, "--timeout", "30"])
+    result = run_command([executable, channel, action, *args, "--backend", backend, "--timeout", "30"],
+                         timeout=180 if channel == "twitter" else 45)
     try:
         payload = json.loads(result.stdout)
         if (payload.get("schema_version"), payload.get("channel"), payload.get("action")) != (1, channel, action):
@@ -178,8 +184,9 @@ def version_key(record):
     return digest([record["source"], record["source_id"], content])
 
 
-def collect(accounts, channels, limit, languages, stop, paused):
+def collect(accounts, channels, limit, languages, stop, paused, video_cache):
     records, coverage = {}, []
+    active_videos = set()
     for source, targets in (("twitter", accounts), ("youtube", channels)):
         if not targets:
             coverage.append({"source": source, "status": "not_configured"})
@@ -206,8 +213,15 @@ def collect(accounts, channels, limit, languages, stop, paused):
                     for video_id in video_ids(target, limit):
                         if stop.is_set():
                             break
+                        active_videos.add(video_id)
                         try:
-                            record, caption_error = youtube_original(video_id, languages)
+                            entry = video_cache.get(video_id)
+                            if entry and time.monotonic() < entry[2]:
+                                record, caption_error, _ = entry
+                            else:
+                                record, caption_error = youtube_original(video_id, languages)
+                                ttl = 3600 if caption_error else 21600
+                                video_cache[video_id] = (record, caption_error, time.monotonic() + ttl)
                         except SourceError as exc:
                             if str(exc) in TERMINAL | {"RATE_LIMITED"}:
                                 raise
@@ -224,31 +238,48 @@ def collect(accounts, channels, limit, languages, stop, paused):
             coverage.append(status)
             if status.get("code") in TERMINAL | {"RATE_LIMITED"}:
                 break
+    for video_id in video_cache.keys() - active_videos:
+        del video_cache[video_id]
     return records, coverage
 
 
 def publish(producer, state, topic, records, stop):
-    result = {"acknowledged": [], "already_delivered": 0, "failed": 0}
+    result = {"acknowledged": [], "already_delivered": 0, "failed": 0, "rejected": []}
     for version, record in records.items():
         if stop.is_set():
             break
-        if state.execute("SELECT 1 FROM delivered WHERE version=?", (version,)).fetchone():
+        if state.execute("SELECT 1 FROM delivered WHERE version=? AND topic=?", (version, topic)).fetchone():
             result["already_delivered"] += 1
+            continue
+        encoded = json.dumps(record, ensure_ascii=False, allow_nan=False).encode()
+        if len(encoded) > MAX_RECORD_BYTES:
+            result["rejected"].append({"source_id": record["source_id"], "code": "RECORD_TOO_LARGE"})
             continue
         receipt = {}
 
         def delivered(error, message):
             if error is None:
                 receipt.update(partition=message.partition(), offset=message.offset())
+            elif isinstance(error, KafkaError):
+                receipt["error"] = error
 
         try:
             producer.produce(topic, key=f"{record['source']}:{record['source_id']}",
-                             value=json.dumps(record, ensure_ascii=False, allow_nan=False), on_delivery=delivered)
-            if producer.flush(25) or not receipt:
+                             value=encoded, on_delivery=delivered)
+            remaining = producer.flush(25)
+            if "error" in receipt:
+                raise KafkaException(receipt["error"])
+            if remaining or "offset" not in receipt:
                 raise RuntimeError("Kafka acknowledgment missing")
             with state:
                 state.execute("INSERT INTO delivered VALUES (?, ?, ?, ?, ?, ?)",
                               (version, record["source_id"], topic, receipt["partition"], receipt["offset"], now()))
+        except KafkaException as exc:
+            if exc.args and isinstance(exc.args[0], KafkaError) and exc.args[0].code() == KafkaError.MSG_SIZE_TOO_LARGE:
+                result["rejected"].append({"source_id": record["source_id"], "code": "RECORD_TOO_LARGE"})
+                continue
+            result["failed"] += 1
+            break
         except (RuntimeError, BufferError, sqlite3.Error):
             result["failed"] += 1
             break
@@ -293,7 +324,7 @@ def main():
     for signum in (signal.SIGTERM, signal.SIGINT):
         signal.signal(signum, lambda *_: stop.set())
     if args.preview:
-        records, coverage = collect(accounts, channels, args.limit, args.languages, stop, {})
+        records, coverage = collect(accounts, channels, args.limit, args.languages, stop, {}, {})
         items = [{"source_id": row["source_id"], "coverage": row["data"]["coverage"],
                   "published_at": row["data"]["published_at"], "text_chars": len(row["data"]["text"])}
                  for row in records.values()]
@@ -303,8 +334,6 @@ def main():
     if not accounts and not channels:
         print(json.dumps({"status": "not_configured"}), flush=True)
         return int(args.once)
-    from confluent_kafka import Producer
-
     args.state.parent.mkdir(parents=True, exist_ok=True)
     with args.state.with_suffix(".lock").open("a") as lock:
         try:
@@ -314,17 +343,18 @@ def main():
         state = sqlite3.connect(args.state)
         try:
             state.execute("""CREATE TABLE IF NOT EXISTS delivered (
-                version TEXT PRIMARY KEY, source_id TEXT NOT NULL, topic TEXT NOT NULL, partition INTEGER NOT NULL,
-                offset INTEGER NOT NULL, acknowledged_at TEXT NOT NULL)""")
+                version TEXT NOT NULL, source_id TEXT NOT NULL, topic TEXT NOT NULL, partition INTEGER NOT NULL,
+                offset INTEGER NOT NULL, acknowledged_at TEXT NOT NULL, PRIMARY KEY (version, topic))""")
             producer = Producer({"bootstrap.servers": args.bootstrap, "acks": "all", "enable.idempotence": True,
                                  "delivery.timeout.ms": 20000, "log_level": 0})
-            paused = {}
+            paused, video_cache = {}, {}
             while not stop.is_set():
-                records, coverage = collect(accounts, channels, args.limit, args.languages, stop, paused)
+                records, coverage = collect(accounts, channels, args.limit, args.languages, stop, paused, video_cache)
                 delivery = publish(producer, state, args.topic, records, stop)
                 print(json.dumps({"polled_at": now(), "coverage": coverage, **delivery}, ensure_ascii=False), flush=True)
                 if args.once:
-                    return int(bool(delivery["failed"]) or any(row["status"] in {"partial", "failed"} for row in coverage))
+                    return int(bool(delivery["failed"] or delivery["rejected"])
+                               or any(row["status"] in {"partial", "failed"} for row in coverage))
                 stop.wait(args.interval)
         finally:
             state.close()
