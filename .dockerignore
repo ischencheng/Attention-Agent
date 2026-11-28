@@ -11,6 +11,16 @@ environments/attention_provenance/runs/
 environments/attention_judgment/runs/
 runs/
 MrBrain-invest-principle/
+skills/mrbrain_invest.py
+skills/investment_principles.json
+environments/research_portfolio/fixtures/mrbrain_framework.json
+environments/attention_judgment/validation.json
+docker-compose.replay.yaml
+bluesky-demo/
+validation/golden-dataset/
+validation/replay-source/
+OBSERVABILITY_RUNBOOK.md
+RESET.md
 **/CLAUDE.md
 validation/*-20??-??-??.json
 validation/*-20??-??-??.md
@@ -23,6 +33,9 @@ __pycache__/
 *.pyo
 *.pyd
 *.log
+build/
+dist/
+*.egg-info/
 
 # Local Kafka persistent data can be huge; never send as build context.
 kafka1/data/

@@ -37,6 +37,9 @@ at each step. In **Decision trace**, filter **Action** to `judge` and look at
 policy reduces the position at the next eligible market open. The demo runs
 locally with fictional data and requires no model service or API keys.
 
+To supply your own research guidance, fill in the
+[Investment Principles template](environments/research_portfolio/README.md#customize-investment-principles).
+
 ## Research loop
 
 ```mermaid

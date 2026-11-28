@@ -6,7 +6,7 @@ an old decision must still resolve to its publication-time annotations and the
 correct original messages after corrections, duplicate deliveries, and restarts.
 
 - [TASK.md](TASK.md): complete agent-facing behavioral contract.
-- [DESIGN.zh-CN.md](DESIGN.zh-CN.md): project rationale, founder sources, Polaris alignment.
+- [DESIGN.zh-CN.md](DESIGN.zh-CN.md): project rationale and design references.
 - `prepare.py`: export the frozen **unsolved** repository, without Git history,
   reference implementation, or evaluator.
 - `grade.py`, `cases.py`, `bridge.py`: externally run, seeded integration grader.

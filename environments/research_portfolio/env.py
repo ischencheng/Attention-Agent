@@ -12,6 +12,8 @@ from pathlib import Path
 import re
 from typing import Any
 
+from skills.investment_principles.tool import load_principles
+
 from .market import Market
 from .clock import event_timeline, is_tick, next_tick, PERIODS
 from .scenario import json_copy, load_manifest, string_list, text, timestamp
@@ -62,7 +64,7 @@ class ResearchPortfolioEnv:
         # The reference is an episode input. A deployment or local file update
         # must not change research guidance halfway through a recorded rollout.
         if framework_snapshot is None:
-            framework_snapshot = json.loads((Path(__file__).parent / "fixtures" / "mrbrain_framework.json").read_text())
+            framework_snapshot = load_principles()
         self._framework_snapshot = json_copy(framework_snapshot)
         if (not isinstance(self._framework_snapshot, dict)
                 or not isinstance(self._framework_snapshot.get("framework"), dict)
@@ -466,11 +468,18 @@ class ResearchPortfolioEnv:
                 asset_id = text(args["asset_id"], "framework asset_id")
                 if asset_id not in self.discovered_assets:
                     raise ValueError("framework asset must have been discovered")
-            result = {"kind": "frozen_original_framework", "source": "skills/mrbrain_invest.py FRAMEWORK",
-                      "original_framework": self.framework_snapshot,
+            snapshot = self.framework_snapshot
+            if snapshot.get("kind") == "frozen_reference_not_an_asset_assessment":
+                # Preserve the response contract for replaying retained, older rollouts.
+                kind, source = "frozen_original_framework", "skills/mrbrain_invest.py FRAMEWORK"
+                limitation = "Bundled original framework snapshot, not a live MrBrain CLI call or generated investment analysis."
+            else:
+                kind, source = "frozen_investment_principles", snapshot.get("source", "retained_snapshot")
+                limitation = "The snapshot provides research guidance. Assessments require observed evidence."
+            result = {"kind": kind, "source": source, "original_framework": snapshot,
                       "dimensions": list(FRAMEWORK_FIELDS), "checklist": list(RISK_FIELDS),
                       "instructions": "Assess each dimension against read evidence. Record PASS, FAIL or UNKNOWN and a reason for every prohibition. NO PRICE DATA blocks increases. Failed gates never block corrections, invalidation or reducing risk.",
-                      "limitation": "Bundled original framework snapshot, not a live MrBrain CLI call or generated investment analysis."}
+                      "limitation": limitation}
         record = {"tool_call_id": f"tool-{len(self.tool_results) + 1}", "as_of": self.now,
                   "step": self.steps,
                   "role": role, "question_id": question_id, "tool": tool,

@@ -28,8 +28,20 @@ Takeout/
 takeout-*.zip
 manual-check-output/
 /MrBrain-invest-principle/
+/skills/mrbrain_invest.py
+/skills/investment_principles.json
+/environments/research_portfolio/fixtures/mrbrain_framework.json
+
+# Retired replay and local operations notes
+/docker-compose.replay.yaml
+/bluesky-demo/
+/validation/golden-dataset/
+/validation/replay-source/
+/OBSERVABILITY_RUNBOOK.md
+/RESET.md
 
 # Local validation exports
+/environments/attention_judgment/validation.json
 /validation/*-20??-??-??.json
 /validation/*-20??-??-??.md
 /reports/financial-rl-environment-2026-10-25/

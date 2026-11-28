@@ -8,19 +8,12 @@
 
 保留原设计的三层职责：Fast 分配注意力，避免过早摘要；Mid 归并事件、交叉核对和保存反证；Strong 将证据与长期问题联系起来。新的产物是发现记录和版本化判断：**目前相信什么、为什么、有哪些反对证据、什么条件会改变看法、下次应检查什么**。`watch / abstain / research / positive / negative` 均可以是合理输出；后两者表示观点方向，不代表下单。
 
-## MrBrain 提供判断原则，不提供标准股价答案
+## 用户自定义投资原则
 
-下表将研究要求对应到五个原始视频。涉及具体历史数字或金融断言时，实际研究仍需独立核实。
-
-| 设计要求 | 原始视频 |
-|---|---|
-| 持续检查原始逻辑、估值与机会成本；没有新变化时，保留判断或继续观察有效。 | [卖出纪律](https://www.youtube.com/watch?v=nMEOcS8hzgg) |
-| 区分资本开支、供需、库存与滞后利润；同一指标在不同周期阶段可能有不同含义。 | [周期](https://www.youtube.com/watch?v=VP09PAKYUq4) |
-| 承认概率估计的不确定性，先说明错了会怎样；现金与等待可以有价值。 | [风险与生存](https://www.youtube.com/watch?v=6WjdqxcEjR8) |
-| 保留选择权、限制不可承受的下行，不能把某一种交易工具当作框架本身。 | [反脆弱](https://www.youtube.com/watch?v=vBu6zJAWcGs) |
-| 护城河应落实为持续经济性，如转换成本、定价权与难复制的优势，不能只复述热门叙事。 | [竞争与护城河](https://www.youtube.com/watch?v=cOxXsKLXbAw) |
-
-不将 PEG、90/10 配置或固定周期年数设成普适答案。`skills/mrbrain_invest.py` 当前返回分析问题与检查清单；调用该脚本不等于完成判断，更不等于学到了投资能力。环境应检查观点怎样随证据更新，而非是否机械填满所有框架字段。
+用户可将[投资原则模板](../../skills/investment_principles/template.json)复制为
+`skills/investment_principles.json`，填写希望代理遵循的证据标准、风险约束和复核条件。
+代理应从可核验的证据推导判断，写清关键假设、反证和失效条件。暂时缺少证据时，
+可以保留判断或继续研究。研究组合环境为每次运行冻结原则版本，结算仍按预先确定的规则执行。
 
 ## 长期记忆与实际运行
 
@@ -38,7 +31,7 @@
 
 结果报告分别呈现：证据与事实质量、反证处理、跨期记忆、信息时点、关注成本、可结算预测、市场表现。比较“无记忆”“只追加摘要”“版本化判断”时固定材料、模型、工具和预算。少量事件或一轮行情只能展示轨迹，不能证明校准、稳定优势或训练收益。
 
-## Mechanize 与岗位理念的具体应用
+## 构建可检验的长程任务
 
 创始人的 [How to fully automate software engineering](https://www.mechanize.work/blog/how-to-fully-automate-software-engineering/)（2025-05-30）强调完整职责与可靠性；这里把发现、记忆、研究、冻结和复盘连成真实产品流程。[The upcoming GPT-3 moment for RL](https://www.mechanize.work/blog/the-upcoming-gpt-3-moment-for-rl/)（2025-06-20）及 [Cheap RL tasks will waste compute](https://www.mechanize.work/blog/cheap-rl-tasks-will-waste-compute/)（2025-08-18）支持构建上下文充分、可检验的任务，而非拼接大量相似问答。
 

@@ -22,7 +22,7 @@ MID_RULES = (
 STRONG_RULES = (
     "Review both qualifying multi-signal annotations and authoritative-hard-data exceptions. "
     "Continue existing theses across cycles, record supporting and contradicting evidence, state invalidation "
-    "conditions and what changed. Carry out the mandatory MrBrain framework/checklist, price-history and "
+    "conditions and what changed. Read the investment principles and apply the mandatory risk, price-history and "
     "semantic contradiction checks when assessing an investment action. Risk gates may block new exposure, "
     "but must never block recording a thesis invalidation, correction or risk reduction. "
     "If no new supported decision is warranted, preserve state without duplicate publication."
