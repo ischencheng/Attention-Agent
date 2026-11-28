@@ -16,5 +16,6 @@ The owner has authorized agents to perform this workflow in this repository.
 Preserve raw observations, state, offsets, evaluation records and credentials.
 Keep downloaded source material, raw validation exports, replay outputs and
 local API configuration on disk. Commit the fixtures and curated results that
-the docs and tests need. Do not call a container's running state proof of a
-working agent, or synthetic test results proof of investment performance.
+the docs and tests need. Build release packages from a fresh checkout so the
+source tree matches the release commit. Do not call a container's running state
+proof of a working agent, or synthetic test results proof of investment performance.
