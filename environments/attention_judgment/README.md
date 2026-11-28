@@ -41,6 +41,10 @@ the account, not the repository. CLI 0.137.0 failed against this account's newer
 model catalog; those failed attempts were retained and did not create judgments.
 The open-source component is the Codex harness; the hosted model is separate.
 
+The pilot uses built-in research guidance. If
+`MrBrain-invest-principle/investment_framework.md` exists in the local checkout,
+it supplies the framework section of the prompt.
+
 `daily.py` locks concurrent daily runs, calls the model once, settles previous
 judgments even if the model fails, and writes:
 
