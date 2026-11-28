@@ -33,6 +33,9 @@ __pycache__/
 *.pyo
 *.pyd
 *.log
+build/
+dist/
+*.egg-info/
 
 # Local Kafka persistent data can be huge; never send as build context.
 kafka1/data/
