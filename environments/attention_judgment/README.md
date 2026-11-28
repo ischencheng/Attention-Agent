@@ -4,8 +4,8 @@ A topic-led, continuing research environment for AI Attention Proxy. It discover
 questions from the original topic scope, keeps versioned evidence-backed theses,
 and observes later outcomes. There is no fixed portfolio or mandatory trade.
 
-The design draws on the local MrBrain material, Mechanize founders' environment
-essays, and the pinned Agent Book. See [DESIGN.zh-CN.md](DESIGN.zh-CN.md) for
+The design draws on Mechanize founders' environment essays and the pinned Agent
+Book. See [DESIGN.zh-CN.md](DESIGN.zh-CN.md) for
 sources, [TASK.md](TASK.md) for the target behavior, and [VERIFICATION.md](VERIFICATION.md)
 for what has actually run. The task contract is broader than this first runtime;
 the limitations below are part of its reported status.
@@ -41,9 +41,9 @@ the account, not the repository. CLI 0.137.0 failed against this account's newer
 model catalog; those failed attempts were retained and did not create judgments.
 The open-source component is the Codex harness; the hosted model is separate.
 
-The pilot uses built-in research guidance. If
-`MrBrain-invest-principle/investment_framework.md` exists in the local checkout,
-it supplies the framework section of the prompt.
+The pilot can use the local
+[Investment Principles](../research_portfolio/README.md#customize-investment-principles)
+to guide research.
 
 `daily.py` locks concurrent daily runs, calls the model once, settles previous
 judgments even if the model fails, and writes:
@@ -119,7 +119,7 @@ historical data vintages; the model may already know old outcomes.
 ## What gets measured
 
 Judgments preserve stable thesis IDs, revisions, supporting/contrary originals,
-MrBrain dimensions, uncertainty, invalidation, intended horizon and research
+research dimensions, uncertainty, invalidation, intended horizon and research
 questions. Research/watch/abstain are valid stances. A revision cannot erase prior
 counterevidence or overwrite a forecast. Source-event IDs verify identity, not
 semantic causal independence; reasoning about syndication remains auditable model

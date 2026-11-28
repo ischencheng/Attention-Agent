@@ -33,6 +33,21 @@ research question, an initial position, a later delivery delay, a judgment
 revision and reduction, then independent storage research while still holding.
 Its fixed action transcript is a regression fixture, not an investment strategy.
 
+### Customize investment principles
+
+From the repository root, copy the [template](../../skills/investment_principles/template.json)
+to the ignored local configuration file and add your own principles.
+
+```bash
+cp -n skills/investment_principles/template.json skills/investment_principles.json
+```
+
+The local pipeline and new replay episodes use this file for research guidance.
+The synthetic demo also runs with the bundled empty template. Each replay
+episode freezes the resolved guidance as `framework.json` for reproduction.
+
+### Run a model policy
+
 For actual model-selected actions, use the existing Codex runner and a compatible
 Codex 0.163 executable with an already configured login:
 
@@ -137,9 +152,8 @@ All instruments require the same complete session grid, including a terminal
 close, before an episode can run. Historical data collection and provenance
 verification are the dataset producer's responsibility.
 
-The `framework` tool returns a bundled snapshot of the original
-`skills/mrbrain_invest.py` framework and checklists, with its source hash. It is
-reference material, not an asset assessment. Strong supplies six analysis
+The `framework` tool returns the episode's frozen investment principles as
+reference material. Strong supplies six analysis
 dimensions and evidence-backed PASS/FAIL/UNKNOWN prohibition checks. An increase
 requires a latest investable judgment, passed checks, original reads, actual
 contradiction search, instrument discovery, framework retrieval and observed

@@ -75,6 +75,10 @@ from the shared Mid/Strong fallback. Empty ordinary cycles skip the model.
 Changing a host model requires restarting the gateway or allowing a new agent
 cycle to start. Let in-flight work finish before restarting services.
 
+Strong can read your own [Investment Principles](environments/research_portfolio/README.md#customize-investment-principles)
+from the local `skills/investment_principles.json` file through the existing
+skills mount.
+
 The default relay does not need model credentials. Its legacy model providers
 remain available for explicit standalone use; opting into them reintroduces an
 upstream classifier. Fast's legacy `local` scoring provider depends on the old

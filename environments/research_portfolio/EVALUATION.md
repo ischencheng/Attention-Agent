@@ -20,7 +20,7 @@ its zero account return does not demonstrate a successful research policy.
 | Initial state | Cash account, topic scope, time-indexed source arrivals, a declared instrument-coverage catalog and frozen market data. |
 | Observation | Originals available by the current cutoff, recorded research state, discovered instruments, tool results, account state and remaining budgets. |
 | Policy | Fast routes information; Mid accumulates source-attributed facts and questions; Strong investigates, revises judgments and proposes allocations. |
-| Research | Read originals, inspect the available catalog, acquire price history and the bundled analytical framework, and document counterevidence. The tool set is recorded for the selected replay mode. |
+| Research | Read originals, inspect the available catalog, acquire price history and the episode's investment principles, and document counterevidence. The tool set is recorded for the selected replay mode. |
 | Action | A typed role action with recorded arguments and execution feedback. Rejected actions consume budget. |
 | Transition | A research-state change, a source arrival, a scheduled review, or a market/account event. |
 | Execution | Cash-only, long-only paper account; complete target weights; next eligible open strictly after submission; frozen fees and slippage. |

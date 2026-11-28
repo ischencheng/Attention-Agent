@@ -23,7 +23,7 @@
 
 这把“保留原始信息”的产品原则落实成可观察的不变量，同时要求代理处理跨模块修改、事务一致性、迁移和兼容性。它没有改写项目的注意力评分策略，也没有加入主观的信息价值或投资收益奖励。
 
-## 博客理念与岗位对应
+## 设计参考
 
 以下是设计依据及本项目的工程解释，不代表作者为本环境背书。
 
@@ -31,8 +31,8 @@
 - **可比较的行为。** 三位创始人的 [The upcoming GPT-3 moment for RL](https://www.mechanize.work/blog/the-upcoming-gpt-3-moment-for-rl/)（2025-06-20）提出参考行为驱动的复制任务，也承认全面测试的难度。本环境公开行为契约，允许不同实现；隐藏实例不能夹带未说明规则。
 - **质量与验证。** Ege 等的 [Cheap RL tasks will waste compute](https://www.mechanize.work/blog/cheap-rl-tasks-will-waste-compute/)（2025-08-18）主张高质量、上下文丰富的任务。其经济预测是观点；本项目采取的做法是先验证一项真实维护任务，不用随机改名充当任务多样性。
 - **覆盖真实使用。** CTO Ege 参与的 [How bad data teaches models to write terrible code](https://mechanizework.substack.com/p/how-bad-data-teaches-models-to-write)（2026-06-16）讨论简单测试漏掉真实交互的问题。这里用“发布后再修订、再回看”的状态序列检验用户结果。
-- **诊断模型失败。** [Mechanize 工作说明](https://www.mechanize.work/what-working-here-is-like/)（未标发布日期，2026-10-19 核对）强调 grader 公平性、确定性及轨迹分析。后续实验应区分模型失误、环境故障和评分缺陷。
-- **Polaris 对应。** [Google DeepMind 官方 JD](https://www.google.com/about/careers/applications/jobs/results/114077679900074694-research-engineer-polaris-deepmind)（未标发布日期，2026-10-19 核对）要求手工构造贴近真实工程的 prompt 与 grader，评估长程能力和模型弱点。本项目对应这些交付物；90 分钟只是初始尝试预算，不能据此宣称已达到长程前沿难度。
+
+验收时应区分模型失误、环境故障和评分缺陷。
 
 ## 范围与证据边界
 
