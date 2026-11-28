@@ -42,7 +42,8 @@ to the ignored local configuration file and add your own principles.
 cp -n skills/investment_principles/template.json skills/investment_principles.json
 ```
 
-The local pipeline and new replay episodes use this file for research guidance.
+Add each principle as a string under the section where it applies. The local
+pipeline and new replay episodes use this file for research guidance.
 The synthetic demo also runs with the bundled empty template. Each replay
 episode freezes the resolved guidance as `framework.json` for reproduction.
 

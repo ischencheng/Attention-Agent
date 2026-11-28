@@ -19,6 +19,7 @@ sys.path.insert(0, str(HERE))
 from ledger import Ledger, timestamp
 import market
 import run as runner
+from skills.investment_principles import tool as principles
 from sources import observation
 
 
@@ -288,17 +289,18 @@ class CycleAndSettlementTests(unittest.TestCase):
                 patch.object(market, "evaluate_horizon", return_value=outcome), redirect_stdout(io.StringIO()):
             runner.settle(SimpleNamespace(), self.ledger)
 
-    def test_prompt_uses_local_framework_when_present(self):
-        with patch.object(runner, "ROOT", self.root):
+    def test_prompt_uses_local_principles_when_present(self):
+        reference = self.root / "investment_principles.json"
+        with patch.object(principles, "LOCAL_PATH", reference):
             default_prompt = runner.make_prompt([], {}, AS_OF)
-            self.assertIn("Consider durable economics", default_prompt)
+            self.assertIn('"risk_and_position_size":[]', default_prompt)
 
-            reference = self.root / "MrBrain-invest-principle" / "investment_framework.md"
-            reference.parent.mkdir()
-            reference.write_text("检查长期风险。", encoding="utf-8")
+            profile = principles.load_principles()["framework"]
+            profile["risk_and_position_size"] = ["检查长期风险。"]
+            reference.write_text(json.dumps(profile, ensure_ascii=False), encoding="utf-8")
             local_prompt = runner.make_prompt([], {}, AS_OF)
             self.assertIn("检查长期风险。", local_prompt)
-            self.assertNotIn("Consider durable economics", local_prompt)
+            self.assertIn("INVESTMENT PRINCIPLES", local_prompt)
 
     def test_reobserved_original_reuses_all_original_metadata(self):
         import codex_runner

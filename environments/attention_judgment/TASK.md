@@ -45,7 +45,8 @@ Entities, tickers, and new related themes may be discovered from evidence.
    evidence is insufficient is valid. Do not force target weights, trades, or
    confidence inflation. A changed view needs new evidence or an explicit
    correction to prior reasoning; a duplicate headline is insufficient.
-5. **Apply the framework to facts.** Select relevant research dimensions and
+5. **Apply investment principles to facts.** Use the local research principles
+   when supplied. Select relevant research dimensions and
    explain the mechanism: durable economics, cycle drivers, alternative outcomes,
    thesis failure, or survivability. `not applicable` and `unknown` are valid with
    reasons. Calling a framework helper or filling fields does not establish that

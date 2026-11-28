@@ -166,10 +166,10 @@ not constitute persisted state or a published annotation/decision.
 6. Save pending themes even when no annotation crosses the publication gate.
 
 Mid does not provide investment opinions, recommendations, sentiment, urgency
-or action sizing. Do not call `mrbrain_invest.py` or `price_history.py` in this
-role. A correct cycle can publish nothing.
+or action sizing. Leave investment principles and price history to Strong.
+A correct cycle can publish nothing.
 
-## Strong: continuing judgments with MrBrain
+## Strong: continuing judgments
 
 Read recent annotations and prior decisions together with persistent theses.
 Do not use an SQL `signal_count >= 3` filter that discards the authoritative
@@ -180,22 +180,23 @@ For any proposed investment action, complete the following steps:
 
 1. Identify the thesis and affected asset, if any. A topic without an asset stays
    in research state; do not force a ticker onto it.
-2. Call the MrBrain framework and retain its actual output:
-   `python /app/skills/mrbrain_invest.py '{"asset":"<asset>","context":"<evidence>"}'`
-3. Call its checklist:
-   `python /app/skills/mrbrain_invest.py '{"action":"checklist","asset":"<asset>","context":"<thesis>"}'`
-   Record PASS/FAIL/UNKNOWN with evidence for each relevant item.
-4. Call price history when a tradable ticker is identified:
+2. Read the investment principles with
+   `python /app/skills/investment_principles/tool.py`. Apply any supplied principles
+   to observed evidence and use the required checks below even if the template is blank.
+   A successful response with `source: "template"` means no custom principles are set.
+   A command error means this check is incomplete. Report the blocker and keep
+   durable research state, including corrections and counterevidence.
+3. Call price history when a tradable ticker is identified:
    `python /app/skills/price_history.py '{"ticker":"<ticker>","period":"5y"}'`
    Record observed indicators, or `NO PRICE DATA` with its implication. Do not
    invent an entry condition from absent prices.
-5. Search for contradictory signals using `search_vectors.py`, and inspect
+4. Search for contradictory signals using `search_vectors.py`, and inspect
    source evidence instead of treating semantic similarity as corroboration.
-6. Evaluate the framework's prohibitions explicitly: leverage, understanding,
-   bankruptcy exposure, momentum chasing and the never-sell fallacy. A failed
-   risk gate blocks a new/increased exposure. It must **not** suppress recording
+5. Evaluate leverage, understanding, bankruptcy exposure, momentum chasing and
+   the never-sell fallacy. Record PASS/FAIL/UNKNOWN with evidence for each check.
+   A failed risk gate blocks a new/increased exposure. It must **not** suppress recording
    disconfirming evidence, thesis invalidation, corrections or risk reduction.
-7. Publish a new `decision_packet` only when supported and materially different
+6. Publish a new `decision_packet` only when supported and materially different
    from prior decisions. Its actions are proposed research conclusions, never
    executable orders. Holding or taking no action is valid with a reason. Size
    or entry/exit conditions must come from supplied assumptions and observed
