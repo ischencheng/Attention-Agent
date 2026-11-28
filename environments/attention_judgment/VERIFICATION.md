@@ -11,6 +11,9 @@ cycle detected an unchanged feed, skipped inference, and made no duplicate
 judgment. Neither cycle recorded a numeric forecast. All six price observations
 were pending at the report cutoff, with zero scored predictions.
 
+This pilot covered the recorded host cycles. Full Docker/Kafka/Flink execution,
+containerized agents, and month-long follow-up were outside its scope.
+
 ## Synthetic longitudinal replay
 
 The scenario staged four updates about a fictional semiconductor company.
@@ -21,8 +24,8 @@ run passed all 14 checks. It carried the thesis across three versions, skipped a
 duplicate, and kept the cancellation evidence after a later correction.
 
 The checks covered thesis continuity, mixed evidence, deduplication, and
-time-gated observations. Held-out forecasting and training effects were outside
-the experiment's scope.
+time-gated observations. Comparisons against stateless or summary-only agents,
+held-out forecasting, and training effects were outside the experiment's scope.
 
 ## Price and software checks
 

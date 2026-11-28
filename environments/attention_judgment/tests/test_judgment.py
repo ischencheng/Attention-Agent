@@ -291,7 +291,8 @@ class CycleAndSettlementTests(unittest.TestCase):
 
     def test_prompt_uses_local_principles_when_present(self):
         reference = self.root / "investment_principles.json"
-        with patch.object(principles, "LOCAL_PATH", reference):
+        with patch.object(principles, "LOCAL_PATH", reference), \
+                patch.dict("os.environ", {"ATTENTION_INVESTMENT_PRINCIPLES": ""}):
             default_prompt = runner.make_prompt([], {}, AS_OF)
             self.assertIn('"risk_and_position_size":[]', default_prompt)
 

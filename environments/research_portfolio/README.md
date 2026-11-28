@@ -47,6 +47,10 @@ pipeline and new replay episodes use this file for research guidance.
 The synthetic demo also runs with the bundled empty template. Each replay
 episode freezes the resolved guidance as `framework.json` for reproduction.
 
+For an installed CLI, set `ATTENTION_INVESTMENT_PRINCIPLES` to the absolute
+path of your filled-in JSON. Point that setting at the blank template when
+running tests in a checkout with personal principles.
+
 ### Run a model policy
 
 For actual model-selected actions, use the existing Codex runner and a compatible

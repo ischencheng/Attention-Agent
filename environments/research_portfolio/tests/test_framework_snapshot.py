@@ -28,6 +28,7 @@ class FrameworkSnapshotTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         self.local = self.root / "investment_principles.json"
+        self.enterContext(patch.dict("os.environ", {"ATTENTION_INVESTMENT_PRINCIPLES": ""}))
         local_path = patch.object(principles, "LOCAL_PATH", self.local)
         local_path.start()
         self.addCleanup(local_path.stop)
@@ -84,6 +85,17 @@ class FrameworkSnapshotTests(unittest.TestCase):
             ResearchPortfolioEnv(FIXTURES / "demo.json")
         env = ResearchPortfolioEnv(FIXTURES / "demo.json", framework_snapshot=self.original)
         self.assertEqual(env.framework_snapshot, self.original)
+
+    def test_explicit_path_overrides_local_file_and_accepts_utf8_bom(self):
+        self.local.write_text("invalid local settings")
+        config = self.root / "explicit.json"
+        profile = copy.deepcopy(self.original["framework"])
+        profile["review_and_exit"] = ["Review every thesis after material news."]
+        with patch.dict("os.environ", {"ATTENTION_INVESTMENT_PRINCIPLES": str(config)}):
+            with self.assertRaises(FileNotFoundError):
+                principles.load_principles()
+            config.write_text(json.dumps(profile), encoding="utf-8-sig")
+            self.assertEqual(ResearchPortfolioEnv(FIXTURES / "demo.json").framework_snapshot["framework"], profile)
 
     def test_full_snapshot_and_digest_exist_before_policy_invocation(self):
         output = self.root / "before-policy"
