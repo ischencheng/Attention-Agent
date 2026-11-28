@@ -34,7 +34,7 @@ Entities, tickers, and new related themes may be discovered from evidence.
    recommendation for every item. A single authoritative filing can be material;
    three reposts do not automatically pass an evidence threshold.
 3. **Maintain a judgment ledger.** Persist thesis identity and version, subject,
-   statement, intended horizon, relevant MrBrain dimensions, supporting and
+   statement, intended horizon, relevant research dimensions, supporting and
    contrary evidence, uncertainty, invalidation conditions, and next research
    questions. Record whether new evidence leaves a thesis unchanged, strengthens
    it, weakens it, contradicts it, or replaces it. Old versions remain inspectable.
@@ -45,7 +45,7 @@ Entities, tickers, and new related themes may be discovered from evidence.
    evidence is insufficient is valid. Do not force target weights, trades, or
    confidence inflation. A changed view needs new evidence or an explicit
    correction to prior reasoning; a duplicate headline is insufficient.
-5. **Apply the framework to facts.** Select relevant MrBrain dimensions and
+5. **Apply the framework to facts.** Select relevant research dimensions and
    explain the mechanism: durable economics, cycle drivers, alternative outcomes,
    thesis failure, or survivability. `not applicable` and `unknown` are valid with
    reasons. Calling a framework helper or filling fields does not establish that

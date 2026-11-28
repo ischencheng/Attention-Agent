@@ -288,6 +288,18 @@ class CycleAndSettlementTests(unittest.TestCase):
                 patch.object(market, "evaluate_horizon", return_value=outcome), redirect_stdout(io.StringIO()):
             runner.settle(SimpleNamespace(), self.ledger)
 
+    def test_prompt_uses_local_framework_when_present(self):
+        with patch.object(runner, "ROOT", self.root):
+            default_prompt = runner.make_prompt([], {}, AS_OF)
+            self.assertIn("Consider durable economics", default_prompt)
+
+            reference = self.root / "MrBrain-invest-principle" / "investment_framework.md"
+            reference.parent.mkdir()
+            reference.write_text("检查长期风险。", encoding="utf-8")
+            local_prompt = runner.make_prompt([], {}, AS_OF)
+            self.assertIn("检查长期风险。", local_prompt)
+            self.assertNotIn("Consider durable economics", local_prompt)
+
     def test_reobserved_original_reuses_all_original_metadata(self):
         import codex_runner
         original = observed()
