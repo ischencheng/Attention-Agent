@@ -1,4 +1,6 @@
 .env
+/.env.*
+!/.env.example
 .venv/
 /runs/
 /environments/research_portfolio/runs/
@@ -25,8 +27,19 @@ node_modules/
 Takeout/
 takeout-*.zip
 manual-check-output/
+/MrBrain-invest-principle/*
+!/MrBrain-invest-principle/investment_framework.md
+
+# Local validation exports
+/validation/*-20??-??-??.json
+/validation/*-20??-??-??.md
+/reports/financial-rl-environment-2026-10-25/
 
 # IDE / AI tooling (session-specific)
+/.agents/
+/*.plan.md
+/common_commnads.md
+/run-pi.ps1
 .pi/
 .npmrc
 .claude/settings.local.json

@@ -53,5 +53,5 @@ forecasts when their observation windows close.
 Source-context support is bounded by the native references actually preserved
 in each provider's originals. It is not a general platform crawler, a guarantee
 of complete chat history, or proof that all retrieved context influenced a
-judgment. See [the trace contract](TRACE_DESIGN.md) and the acceptance records in
-`validation/` for implemented coverage and measured limitations.
+judgment. See [the trace contract](TRACE_DESIGN.md) for supported source context
+and how the dashboard represents it.

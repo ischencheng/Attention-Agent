@@ -14,6 +14,7 @@ After verification, merge the PR into main and confirm that its issue is closed.
 The owner has authorized agents to perform this workflow in this repository.
 
 Preserve raw observations, state, offsets, evaluation records and credentials.
-Runtime data and local API configuration are ignored by Git. Do not call a
-container's running state proof of a working agent, or synthetic test results
-proof of investment performance.
+Keep downloaded source material, raw validation exports, replay outputs and
+local API configuration on disk. Commit the fixtures and curated results that
+the docs and tests need. Do not call a container's running state proof of a
+working agent, or synthetic test results proof of investment performance.
