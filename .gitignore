@@ -27,8 +27,7 @@ node_modules/
 Takeout/
 takeout-*.zip
 manual-check-output/
-/MrBrain-invest-principle/*
-!/MrBrain-invest-principle/investment_framework.md
+/MrBrain-invest-principle/
 
 # Local validation exports
 /validation/*-20??-??-??.json
@@ -37,6 +36,7 @@ manual-check-output/
 
 # IDE / AI tooling (session-specific)
 /.agents/
+CLAUDE.md
 /*.plan.md
 /common_commnads.md
 /run-pi.ps1

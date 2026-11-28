@@ -10,8 +10,8 @@ postgres/data/
 environments/attention_provenance/runs/
 environments/attention_judgment/runs/
 runs/
-MrBrain-invest-principle/*
-!MrBrain-invest-principle/investment_framework.md
+MrBrain-invest-principle/
+**/CLAUDE.md
 validation/*-20??-??-??.json
 validation/*-20??-??-??.md
 reports/financial-rl-environment-2026-10-25/
