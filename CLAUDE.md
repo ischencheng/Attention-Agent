@@ -143,7 +143,7 @@ All messages use a unified envelope: `{source, source_id, content_type, timestam
 - **skills/db_write.py** — Write to Kafka topics (annotations, decision_packet) via skill → Kafka → sink → DB
 - **skills/db_update.py** — Update existing rows (e.g., append tickets to annotations)
 - **skills/search_vectors.py** — Semantic search over vector embeddings
-- **skills/mrbrain_invest.py** — Evaluate investments using MrBrain's 10-layer framework (value investing, risk management, macro cycles, competition theory, psychology). Source: 43 videos from 脑总MrBrain. Reference: `MrBrain-invest-principle/`
+- **skills/mrbrain_invest.py** — Evaluate investments using MrBrain's 10-layer framework (value investing, risk management, macro cycles, competition theory, psychology). Source: 43 videos from 脑总MrBrain. Reference: `MrBrain-invest-principle/investment_framework.md`
 
 **Agent** (`agent/`):
 - **agent/AGENTS.md** — Workspace instructions for mid/strong agents running inside Docker

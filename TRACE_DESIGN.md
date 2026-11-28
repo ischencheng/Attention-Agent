@@ -74,6 +74,10 @@ does not establish which messages the deciding agent read. The current adapter
 covers stored Twitter reply ancestors. Complete thread crawling and bounded
 chat-history retrieval require separate source support and are not implemented.
 
+The October 19, 2026 deployment check used collected records. The API and CLI
+resolved the same stored parent. A missing parent was reported explicitly, and
+a one-record limit marked the response as truncated.
+
 Only structured application events, summaries and source records enter the
 explorer. Gateway tokens, API keys and private raw runtime transcripts are outside
 the API's mounted data directories.

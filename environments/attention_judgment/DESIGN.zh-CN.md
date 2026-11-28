@@ -10,15 +10,15 @@
 
 ## MrBrain 提供判断原则，不提供标准股价答案
 
-已检查技能参考、仓库框架及以下五份原始文字稿。它们表达作者的分析方法；涉及具体历史数字或金融断言时，实际研究仍需独立核实。
+下表将研究要求对应到五个原始视频。涉及具体历史数字或金融断言时，实际研究仍需独立核实。
 
-| 设计要求 | 仓库中的原始依据 |
+| 设计要求 | 原始视频 |
 |---|---|
-| 持续检查原始逻辑、估值与机会成本；没有新变化时，保留判断或继续观察有效。 | [卖出纪律，视频 nMEOcS8hzgg](../../MrBrain-invest-principle/transcripts/nMEOcS8hzgg_巴菲特们藏私的一招_股票卖点的秘密.txt)，650–780 行 |
-| 区分资本开支、供需、库存与滞后利润；同一指标在不同周期阶段可能有不同含义。 | [周期，视频 VP09PAKYUq4](../../MrBrain-invest-principle/transcripts/VP09PAKYUq4_一口气讲透周期_强周期股投资要义.txt)，738–1004 行 |
-| 承认概率估计的不确定性，先说明错了会怎样；现金与等待可以有价值。 | [风险与生存，视频 6WjdqxcEjR8](../../MrBrain-invest-principle/transcripts/6WjdqxcEjR8_概率的傲慢与赔率的智慧__随机漫步的傻瓜_与_黑天鹅_述评.txt)，82–148、448–590 行 |
-| 保留选择权、限制不可承受的下行，不能把某一种交易工具当作框架本身。 | [反脆弱，视频 vBu6zJAWcGs](../../MrBrain-invest-principle/transcripts/vBu6zJAWcGs_右派投资者的自我修养__反脆弱_与_非对称风险_述评.txt)，1722–1791 行 |
-| 护城河应落实为持续经济性，如转换成本、定价权与难复制的优势，不能只复述热门叙事。 | [竞争与护城河，视频 cOxXsKLXbAw](../../MrBrain-invest-principle/transcripts/cOxXsKLXbAw_为什么竞争一文不值_颠覆你对投资和人生的全部认知.txt)，400–540、570–710 行 |
+| 持续检查原始逻辑、估值与机会成本；没有新变化时，保留判断或继续观察有效。 | [卖出纪律](https://www.youtube.com/watch?v=nMEOcS8hzgg) |
+| 区分资本开支、供需、库存与滞后利润；同一指标在不同周期阶段可能有不同含义。 | [周期](https://www.youtube.com/watch?v=VP09PAKYUq4) |
+| 承认概率估计的不确定性，先说明错了会怎样；现金与等待可以有价值。 | [风险与生存](https://www.youtube.com/watch?v=6WjdqxcEjR8) |
+| 保留选择权、限制不可承受的下行，不能把某一种交易工具当作框架本身。 | [反脆弱](https://www.youtube.com/watch?v=vBu6zJAWcGs) |
+| 护城河应落实为持续经济性，如转换成本、定价权与难复制的优势，不能只复述热门叙事。 | [竞争与护城河](https://www.youtube.com/watch?v=cOxXsKLXbAw) |
 
 不将 PEG、90/10 配置或固定周期年数设成普适答案。`skills/mrbrain_invest.py` 当前返回分析问题与检查清单；调用该脚本不等于完成判断，更不等于学到了投资能力。环境应检查观点怎样随证据更新，而非是否机械填满所有框架字段。
 
