@@ -110,5 +110,5 @@ python -m unittest discover -s scripts/tests -v
 python -m unittest discover -s environments/research_portfolio/tests -v
 ```
 
-These commands run the contract suites used in CI. CI also generates the
-synthetic replay exhibit.
+These commands run the contract suites used in CI. CI also smoke-tests the
+synthetic replay.

@@ -118,5 +118,5 @@ reviewer, evidence, and rationale; it is not an infallible reward oracle.
   durable investment skill, model training gains, or general long-horizon ability
   from a passing schema test or a small profitable sample.
 
-The source-grounded rationale, relevant local transcripts, and external design
-references are in [DESIGN.zh-CN.md](DESIGN.zh-CN.md).
+See [DESIGN.zh-CN.md](DESIGN.zh-CN.md) for the design rationale and links to
+the original sources.
